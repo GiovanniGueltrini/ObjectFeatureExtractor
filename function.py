@@ -64,7 +64,6 @@ def estrazzione_features_geometriche(mask: Image.Image) -> np.ndarray:
 
     # Binarizzazione sicura (0/255)
     _, mask_bin = cv2.threshold(mask_np, 127, 255, cv2.THRESH_BINARY)
-    print(np.unique(mask_bin))
 
     # Area (pixel bianchi)
     area = float(np.count_nonzero(mask_bin))
@@ -122,31 +121,97 @@ def estrazione_feature_texturali(img, img_binary, raggio=3, punti=4):
     """
     img_binary_np = np.array(img_binary.convert("L"), dtype=np.uint8)
     img = np.array(img, dtype=np.uint8)
-    vettore_features=[]
+    vettore_haralick=[]
+    vettore_lib=[]
+    # isolate color channel
     for i in range(3):
-        vettore=[]
-        # isolate color channel
-        img_np=img[:,:,i]
-        for i in range(3):
-            # select the region of interest
-            roi = cv2.bitwise_and(img_np, img_np, mask=img_binary_np)
-            # pixel mean and variance
-            media_pixel = np.mean(roi.flatten())
-            varianza_pixel = np.var(roi.flatten())
-            # haralick feature extraction
-            features_haralick = mahotas.features.haralick(roi,ignore_zeros=True)
-            mean_features_haralick = features_haralick.mean(axis=0)
-            # extraction Binary linear pattern
-            features_lib = mahotas.features.lbp(roi, raggio, punti, ignore_zeros=True)
-            # concatenation of all values into a single vector
-            vettore.append(media_pixel)
-            vettore.append(varianza_pixel)
-            features = np.concatenate([vettore, mean_features_haralick, features_lib])
-            vettore_features=np.concatenate([vettore_features, features])
+        img_np = img[:, :, i]
+        # select the region of interest
+        roi = cv2.bitwise_and(img_np, img_np, mask=img_binary_np)
+        # pixel mean and variance
+        media_pixel = np.mean(roi.flatten())
+        varianza_pixel = np.var(roi.flatten())
+        # haralick feature extraction
+        features_haralick = mahotas.features.haralick(roi,ignore_zeros=True)
+        mean_features_haralick = features_haralick.mean(axis=0)
+        # extraction Binary linear pattern
+        features_lib = mahotas.features.lbp(roi, raggio, punti, ignore_zeros=True)
+        # concatenation of all values into a single vector
+        mean_features_haralick = np.r_[varianza_pixel,mean_features_haralick]
+        mean_features_haralick=np.r_[media_pixel,mean_features_haralick]
+        vettore_haralick=np.concatenate([vettore_haralick,mean_features_haralick])
+        vettore_lib=np.concatenate([vettore_lib,features_lib])
+    return vettore_haralick,vettore_lib
 
-    return vettore_features
+def estrazioni_feature_e_nomi(img, img_binary,
+                             nomi_features_geometriche,
+                             nomi_features_haralick_canali,
+                             nomi_canali,
+                             raggio=3, punti=4):
+    """
+    Questa funzione calcola il vettore completo delle feature (geometriche + testurali)
+    e restituisce in parallelo i nomi corrispondenti a ciascuna feature, in modo da avere
+    una rappresentazione interpretabile e tracciabile delle colonne (utile per CSV/DataFrame).
+
+    La parte testurale è composta da:
+    - Haralick (con media/varianza pixel aggiunte) per ciascun canale
+    - LBP per ciascun canale (con nomi generati dinamicamente in base alla lunghezza)
+
+    :param img: Image (RGB). Immagine di input su cui estrarre le feature.
+    :param img_binary: Mask of the image. Maschera binaria che definisce la ROI.
+    :param nomi_features_geometriche: lista/array di stringhe contenente i nomi delle feature geometriche.
+    :param nomi_features_haralick_canali: lista/array di stringhe contenente i nomi delle feature haralick (già espansi per canale).
+    :param nomi_canali: lista di stringhe con i nomi dei canali (es. ["R","G","B"]).
+    :param raggio: parameter of lbp. Raggio usato per il calcolo delle LBP.
+    :param punti: parameter of lbp. Numero di punti usati per il calcolo delle LBP.
+    :return: (features, nomi)
+             - features: ndarray 1D con tutte le feature concatenate (geometriche + haralick + lbp)
+             - nomi: ndarray/lista con i nomi corrispondenti alle feature (stesso ordine e stessa lunghezza)
+    """
+    # Estrazione delle feature testurali (separate in haralick e lbp)
+    haralick, lib = estrazione_feature_texturali(img, img_binary, raggio=raggio, punti=punti)
+    # Concatenazione delle feature testurali in un unico vettore
+    feature_testurali = np.concatenate([haralick, lib])
+    # Concatenazione finale: feature geometriche + feature testurali
+    features = np.concatenate([estrazzione_features_geometriche(img_binary), feature_testurali])
+    # Costruzione dei nomi delle feature LBP:
+    # lib contiene le LBP di tutti e 3 i canali concatenate, quindi la lunghezza per canale è len(lib)/3
+    nomi_lib = []
+    len_lib = len(lib) / 3
+    # Per ogni canale, creo i nomi LBP_1_<canale>, LBP_2_<canale>, ...
+    for nome_canale in nomi_canali:
+        for i in range(int(len_lib)):
+            nomi_lib.append(f"LBP_{i+1}_{nome_canale}")
+    # Concatenazione finale dei nomi: geometriche + haralick (già preparate) + lbp (generate qui)
+    nomi = np.concatenate([nomi_features_geometriche, nomi_features_haralick_canali, nomi_lib])
+    return features, nomi
+
 
 def main():
+    nomi_features_geometriche = ["height", "width", "area", "aspect_ratio", "extent", "solidity", "equivalent_diameter",
+                                 "hu1", "hu2", "hu3", "hu4", "hu5", "hu6", "hu7"]
+    nomi_feature_haralick = [
+        "mean_color",
+        "variance_color",
+        "Angular Second Moment (Energy)",
+        "Contrast",
+        "Correlation",
+        "Variance",
+        "Inverse Difference Moment (Homogeneity)",
+        "Sum Average",
+        "Sum Variance",
+        "Sum Entropy",
+        "Entropy",
+        "Difference Variance",
+        "Difference Entropy",
+        "Information Measure of Correlation 1",
+        "Information Measure of Correlation 2"]
+    nomi_features_haralick_canali=[]
+    nomi_canali=["Red", "Green", "Blue"]
+    for nome in nomi_canali:
+        nomi_features_haralick_canali = np.concatenate([nomi_features_haralick_canali,[f"{n}_{nome}" for n in nomi_feature_haralick]])
+
+
     img=apri_immagine(r"C:\Users\Giovanni Gueltrini\Desktop\unibo\Tirocinio_cimbria\Prove_output_programma\dataset_prova\immagini_2.png")
     img_th=threshold(
             img,
@@ -154,7 +219,7 @@ def main():
             0,50,
             80, 200)
 
-    print(estrazione_feature_texturali(img,img_th, raggio=3, punti=4))
+    x,y=estrazioni_feature_e_nomi(img,img_th,nomi_features_geometriche, nomi_features_haralick_canali,nomi_canali, raggio=4, punti=7)
 
 if __name__ == "__main__":
     main()
