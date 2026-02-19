@@ -5,8 +5,8 @@ import cv2
 import mahotas
 def apri_immagine(path: str) -> Image.Image:
     """
-    Apre un'immagine da percorso e la converte in RGB.
-    Funziona con qualsiasi formato supportato da Pillow
+    Opens an image from a path and converts it to RGB.
+    Works with any format supported by Pillow.
     (PNG, JPEG, BMP, TIFF, WEBP, GIF, ecc.).
     """
     try:
@@ -111,41 +111,50 @@ def estrazzione_features_geometriche(mask: Image.Image) -> np.ndarray:
     return features
 
 def estrazione_feature_texturali(img, img_binary, raggio=3, punti=4):
-    vettore=[]
+    """
+    questa funzione restituirà un vettore dove saranno presenti le feature texturali
+    per ogni canale dell'immagine.
+    :param img: Image
+    :param img_binary: Mask of the image
+    :param raggio: parameter of lbp
+    :param punti: parameter of lbp
+    :return: vector of features
+    """
     img_binary_np = np.array(img_binary.convert("L"), dtype=np.uint8)
-    img_np = np.array(img.convert("L"), dtype=np.uint8)
-    maschera_booleana = img_binary_np > 0
-    #for i in range(3):
-    pixel_selezionati = img_np[maschera_booleana]
-    media_pixel = np.mean(pixel_selezionati)
-    varianza_pixel = np.var(pixel_selezionati)
-    roi = cv2.bitwise_and(img_np, img_np, mask=img_binary_np)
-    features_haralick = mahotas.features.haralick(roi,ignore_zeros=True)
-    mean_features_haralick = features_haralick.mean(axis=0)
-    features_lib = mahotas.features.lbp(roi, raggio, punti, ignore_zeros=True)
-    vettore.append(media_pixel)
-    vettore.append(varianza_pixel)
-    v_unico = np.concatenate([vettore, mean_features_haralick, features_lib])
+    img = np.array(img, dtype=np.uint8)
+    vettore_features=[]
+    for i in range(3):
+        vettore=[]
+        # isolate color channel
+        img_np=img[:,:,i]
+        for i in range(3):
+            # select the region of interest
+            roi = cv2.bitwise_and(img_np, img_np, mask=img_binary_np)
+            # pixel mean and variance
+            media_pixel = np.mean(roi.flatten())
+            varianza_pixel = np.var(roi.flatten())
+            # haralick feature extraction
+            features_haralick = mahotas.features.haralick(roi,ignore_zeros=True)
+            mean_features_haralick = features_haralick.mean(axis=0)
+            # extraction Binary linear pattern
+            features_lib = mahotas.features.lbp(roi, raggio, punti, ignore_zeros=True)
+            # concatenation of all values into a single vector
+            vettore.append(media_pixel)
+            vettore.append(varianza_pixel)
+            features = np.concatenate([vettore, mean_features_haralick, features_lib])
+            vettore_features=np.concatenate([vettore_features, features])
 
+    return vettore_features
 
 def main():
     img=apri_immagine(r"C:\Users\Giovanni Gueltrini\Desktop\unibo\Tirocinio_cimbria\Prove_output_programma\dataset_prova\immagini_2.png")
-    plt.figure()
-    plt.imshow(img, cmap="gray")
-    plt.axis("off")
-    plt.show()
     img_th=threshold(
             img,
             0, 50,
             0,50,
-            80, 200
-        )
-    plt.figure()
-    plt.imshow(img_th, cmap="gray")
-    plt.axis("off")
-    plt.show()
-    #print(estrazzione_features(img_th))
-    estrazione_feature_texturali(img,img_th)
+            80, 200)
+
+    print(estrazione_feature_texturali(img,img_th, raggio=3, punti=4))
 
 if __name__ == "__main__":
     main()
