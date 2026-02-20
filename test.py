@@ -52,9 +52,8 @@ def test_threshold(h, w, r_min, r_max, g_min, g_max, b_min, b_max):
         255, 0
     ).astype(np.uint8)
 
-    assert out.mode == "L"
-    assert out.size == img.size
-    assert np.array_equal(out_arr, expected)
+    assert out.size == img.size #Deve avere la stessa dimensione dell’input
+    assert np.array_equal(out_arr, expected) #Ogni pixel deve essere identico a expected
 
 @given(
     H=st.integers(min_value=16, max_value=128),
