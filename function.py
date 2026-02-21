@@ -3,6 +3,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 import mahotas
+
+from pathlib import Path
+import pandas as pd
+
 def apri_immagine(path: str) -> Image.Image:
     """
     Opens an image from a path and converts it to RGB.
@@ -186,10 +190,45 @@ def estrazioni_feature_e_nomi(img, img_binary,
     nomi = np.concatenate([nomi_features_geometriche, nomi_features_haralick_canali, nomi_lib])
     return features, nomi
 
+def directory_immagini_to_csv(directory_path: str, recursive: bool = True, csv_name: str = "paths_immagini.csv") -> pd.DataFrame:
+    """
+    Crea un DataFrame con una sola colonna 'path' contenente i percorsi delle immagini
+    presenti in una directory (opzionalmente anche nelle sottodirectory) e lo salva come CSV
+    nella stessa directory.
 
+    Args:
+        directory_path: percorso della directory da scandire
+        recursive: se True scandisce anche le sottocartelle
+        csv_name: nome del file csv da salvare nella directory
+
+    Returns:
+        df: DataFrame con colonna 'path'
+    """
+    dir_path = Path(directory_path)
+
+    if not dir_path.exists():
+        raise FileNotFoundError(f"Directory non trovata: {dir_path}")
+    if not dir_path.is_dir():
+        raise NotADirectoryError(f"Non è una directory: {dir_path}")
+
+    # Estensioni immagini comuni (aggiungine se ti serve)
+    exts = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+
+    pattern = "**/*" if recursive else "*"
+    image_paths = [
+        str(p.resolve())
+        for p in dir_path.glob(pattern)
+        if p.is_file() and p.suffix.lower() in exts
+    ]
+
+    df = pd.DataFrame({"path": image_paths})
+
+    out_csv = dir_path / csv_name
+    df.to_csv(out_csv, index=False)
+
+    return df
 def main():
-    nomi_features_geometriche = ["height", "width", "area", "aspect_ratio", "extent", "solidity", "equivalent_diameter",
-                                 "hu1", "hu2", "hu3", "hu4", "hu5", "hu6", "hu7"]
+
     nomi_feature_haralick = [
         "mean_color",
         "variance_color",
@@ -221,4 +260,5 @@ def main():
     x,y=estrazioni_feature_e_nomi(img,img_th,nomi_features_geometriche, nomi_features_haralick_canali,nomi_canali, raggio=4, punti=7)
 
 if __name__ == "__main__":
-    main()
+    directory_immagini_to_csv(r"C:\Users\Giovanni Gueltrini\Desktop\unibo\Tirocinio_cimbria\Prove_output_programma\dataset_prova")
+    #main()
