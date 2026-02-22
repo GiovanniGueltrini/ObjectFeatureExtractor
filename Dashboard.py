@@ -7,6 +7,12 @@ from function import threshold, estrazioni_feature_e_nomi
 import numpy as np
 import pandas as pd
 import os
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from sklearn.cluster import KMeans
+
 
 class App:
     def __init__(self, root):
@@ -25,15 +31,20 @@ class App:
         self.df_csv = None
         self._suspend_threshold = False
         self.feature_cols = []
+        self.pca_model = None
+        self.pca_scores = None  # DataFrame con PC1..PCn
+        self.pca_feature_cols = []  # le colonne usate davvero per PCA
+        self.kmeans_k = tk.IntVar(value=3)
+        self.kmeans_labels = None
         # soglie RGB
         self.rmin, self.rmax = tk.IntVar(value=0), tk.IntVar(value=255)
         self.gmin, self.gmax = tk.IntVar(value=0), tk.IntVar(value=255)
         self.bmin, self.bmax = tk.IntVar(value=0), tk.IntVar(value=255)
-
+        self.use_pca = tk.BooleanVar(value=False)
+        self.pca_n = tk.IntVar(value=2)
         # parametri LBP
         self.raggio = tk.IntVar(value=3)
         self.punti = tk.IntVar(value=4)
-
         self._ui()
         self._auto_bind_threshold()
         self.nomi_features_geometriche=["height", "width", "area", "aspect_ratio", "extent", "solidity",
@@ -65,16 +76,27 @@ class App:
         top = ttk.Frame(self.root, padding=8)
         top.pack(fill="x")
 
+        ttk.Button(top, text="Carica CSV", command=self.load_csv).grid(row=0, column=0, padx=4, pady=(0, 4), sticky="w")
 
+        ttk.Button(top, text="Estrai feature", command=self.extract_features).grid(row=0, column=1, padx=4, pady=(0, 4),
+                                                                                   sticky="w")
+        ttk.Button(top, text="Salva feature", command=self.save_features).grid(row=0, column=2, padx=4, pady=(0, 4),
+                                                                               sticky="w")
+        ttk.Button(top, text="Salva feature (tutto)", command=self.save_features_all).grid(row=0, column=3, padx=4,
+                                                                                           pady=(0, 4), sticky="w")
+        ttk.Button(top, text="Sottofinestra", command=self.open_subwindow).grid(row=0, column=4, padx=4, pady=(0, 4),
+                                                                                sticky="w")
 
-        ttk.Button(top, text="Carica CSV", command=self.load_csv).pack(side="left", padx=4)
-        ttk.Button(top, text="<< Prev", command=self.prev).pack(side="left", padx=4)
-        ttk.Button(top, text="Next >>", command=self.next).pack(side="left", padx=4)
-        ttk.Button(top, text="Estrai feature", command=self.extract_features).pack(side="left", padx=12)
-        ttk.Button(top, text="Salva feature", command=self.save_features).pack(side="left", padx=4)
-        ttk.Button(top, text="Salva feature (tutto)", command=self.save_features_all).pack(side="left", padx=4)
+        # riga 1: Prev/Next sotto Carica CSV
+        ttk.Button(top, text="<< Prev", command=self.prev).grid(row=1, column=0, padx=4, sticky="w")
+        ttk.Button(top, text="Next >>", command=self.next).grid(row=1, column=1, padx=4, sticky="w")
+
+        # status (a destra, su entrambe le righe)
         self.status = ttk.Label(top, text="Nessun CSV.")
-        self.status.pack(side="left", padx=12)
+        self.status.grid(row=0, column=5, rowspan=2, padx=12, sticky="w")
+
+        # opzionale: lascia spazio elastico a destra
+        top.grid_columnconfigure(6, weight=1)
 
         dash = ttk.LabelFrame(self.root, text="Threshold RGB (min/max) + LBP (raggio/punti)", padding=8)
         dash.pack(fill="x", padx=8, pady=6)
@@ -131,6 +153,302 @@ class App:
         self.txt.pack(side="left", fill="both", expand=True)
 
         self.txt.configure(font=("Consolas", 10))
+
+    def open_subwindow(self):
+        win = tk.Toplevel(self.root)
+        win.title("PCA + Plot")
+        win.geometry("950x700")
+        win.transient(self.root)
+        win.grab_set()
+
+        # --- Layout: controlli sopra, plot sotto
+        ctrl = ttk.Frame(win, padding=10)
+        ctrl.pack(fill="x")
+        ttk.Label(ctrl, text="k cluster:").grid(row=0, column=7, sticky="e", padx=(20, 4))
+        k_spn = ttk.Spinbox(ctrl, from_=2, to=50, textvariable=self.kmeans_k, width=6)
+
+        k_spn.grid(row=0, column=8, sticky="w", padx=(0, 10))
+        plot_frm = ttk.Frame(win, padding=10)
+        plot_frm.pack(fill="both", expand=True)
+
+        # ---- Variabili UI (usiamo quelle già in __init__: self.use_pca, self.pca_n)
+        # se NON le hai in __init__, aggiungile:
+        # self.use_pca = tk.BooleanVar(value=False)
+        # self.pca_n = tk.IntVar(value=2)
+
+        ttk.Checkbutton(ctrl, text="Applica PCA", variable=self.use_pca).grid(row=0, column=0, sticky="w")
+
+        ttk.Label(ctrl, text="n componenti:").grid(row=0, column=1, sticky="e", padx=(14, 4))
+        spn = ttk.Spinbox(ctrl, from_=2, to=999, textvariable=self.pca_n, width=6)
+        spn.grid(row=0, column=2, sticky="w")
+
+        ttk.Label(ctrl, text="Asse X:").grid(row=0, column=3, sticky="e", padx=(20, 4))
+        x_var = tk.StringVar(value="PC1")
+        x_cb = ttk.Combobox(ctrl, textvariable=x_var, values=["PC1", "PC2"], width=6, state="readonly")
+        x_cb.grid(row=0, column=4, sticky="w")
+
+        ttk.Label(ctrl, text="Asse Y:").grid(row=0, column=5, sticky="e", padx=(14, 4))
+        y_var = tk.StringVar(value="PC2")
+        y_cb = ttk.Combobox(ctrl, textvariable=y_var, values=["PC1", "PC2"], width=6, state="readonly")
+        y_cb.grid(row=0, column=6, sticky="w")
+
+        # ---- Matplotlib canvas
+        fig = plt.Figure()
+        ax = fig.add_subplot(111)
+        canvas = FigureCanvasTkAgg(fig, master=plot_frm)
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        # ---- Calcolo PCA + aggiorna plot
+        def compute_and_plot():
+            if self.df_csv is None:
+                messagebox.showwarning("PCA", "Carica prima un CSV.")
+                return
+            exclude = {"path", "lbp_raggio", "lbp_punti",
+                       "thr_rmin", "thr_rmax", "thr_gmin", "thr_gmax", "thr_bmin", "thr_bmax"}
+            cols = [c for c in self.df_csv.columns if c not in exclude]
+
+            # tieni solo quelle convertibili a numeriche (evita stringhe pure)
+            tmp = self.df_csv[cols].apply(pd.to_numeric, errors="coerce")
+            # tieni colonne non completamente NaN
+            cols = [c for c in cols if not tmp[c].isna().all()]
+            if not cols:
+                messagebox.showwarning("PCA", "Non trovo feature numeriche (escludendo thr_*, lbp_*, path).")
+                return
+
+            X = self.df_csv[cols].apply(pd.to_numeric, errors="coerce")
+            valid_mask = ~X.isna().any(axis=1)
+            Xv = X.loc[valid_mask].values
+
+            if Xv.shape[0] < 2:
+                messagebox.showwarning("PCA", "Non ho abbastanza righe valide (troppe NaN).")
+                return
+
+            # n componenti
+            ncomp = int(self.pca_n.get()) if self.use_pca.get() else 2
+            ncomp = max(2, ncomp)
+            ncomp = min(ncomp, Xv.shape[1])
+
+            # fit PCA
+            scaler = StandardScaler()
+            Xs = scaler.fit_transform(Xv)
+
+            pca = PCA(n_components=ncomp)
+            scores = pca.fit_transform(Xs)
+
+            pc_cols = [f"PC{k}" for k in range(1, ncomp + 1)]
+            df_scores = pd.DataFrame(scores, columns=pc_cols)
+
+            # aggiorna dropdown PC disponibili
+            x_cb.configure(values=pc_cols)
+            y_cb.configure(values=pc_cols)
+
+            # se selezione attuale non è valida, correggo
+            if x_var.get() not in pc_cols:
+                x_var.set(pc_cols[0])
+            if y_var.get() not in pc_cols:
+                y_var.set(pc_cols[1] if len(pc_cols) > 1 else pc_cols[0])
+
+            # plot
+            ax.clear()
+            xs = df_scores[x_var.get()].values
+            ys = df_scores[y_var.get()].values
+            ax.scatter(xs, ys)
+            ax.set_xlabel(x_var.get())
+            ax.set_ylabel(y_var.get())
+            ax.set_title(
+                f"{x_var.get()} vs {y_var.get()}  |  n={len(df_scores)}  |  var PC1={pca.explained_variance_ratio_[0]:.3f}")
+            canvas.draw_idle()
+
+            # salva in memoria se ti serve dopo
+            self.pca_model = pca
+            self.pca_scores = df_scores
+            self.pca_feature_cols = cols
+            self.pca_scaler = scaler
+
+        # aggiorna solo il plot (senza rifare PCA) quando cambi combo,
+        # ma per semplicità: rifacciamo plot usando self.pca_scores già calcolato
+        def redraw_only():
+            if self.pca_scores is None:
+                return
+            xcol, ycol = x_var.get(), y_var.get()
+            if xcol not in self.pca_scores.columns or ycol not in self.pca_scores.columns:
+                return
+
+            ax.clear()
+            xs = self.pca_scores[xcol].values
+            ys = self.pca_scores[ycol].values
+
+            # se ho labels di clustering, coloro per cluster
+            if self.kmeans_labels is not None and len(self.kmeans_labels) == len(self.pca_scores):
+                ax.scatter(xs, ys, c=self.kmeans_labels)
+                ax.set_title(f"{xcol} vs {ycol} (KMeans k={int(self.kmeans_k.get())})")
+            else:
+                ax.scatter(xs, ys)
+                ax.set_title(f"{xcol} vs {ycol}")
+
+            ax.set_xlabel(xcol)
+            ax.set_ylabel(ycol)
+            canvas.draw_idle()
+
+        def run_kmeans_and_plot():
+            if self.pca_scores is None:
+                messagebox.showwarning("K-Means", "Prima calcola la PCA (Calcola / Refresh).")
+                return
+
+            k = int(self.kmeans_k.get())
+            if k < 2:
+                messagebox.showwarning("K-Means", "k deve essere >= 2.")
+                return
+            if k > len(self.pca_scores):
+                messagebox.showwarning("K-Means", "k troppo grande rispetto al numero di campioni.")
+                return
+
+            # clustering sui punteggi PCA (tutte le componenti calcolate)
+            Xc = self.pca_scores.values
+
+            km = KMeans(n_clusters=k, n_init=10, random_state=0)
+            labels = km.fit_predict(Xc)
+
+            self.kmeans_labels = labels
+            redraw_only()
+        x_cb.bind("<<ComboboxSelected>>", lambda e: redraw_only())
+        y_cb.bind("<<ComboboxSelected>>", lambda e: redraw_only())
+
+        # abilita/disabilita spinbox in base al checkbox
+        def _sync_state(*_):
+            spn.configure(state=("normal" if self.use_pca.get() else "disabled"))
+
+        self.use_pca.trace_add("write", _sync_state)
+        _sync_state()
+
+        # ---- Bottoni
+        btns = ttk.Frame(ctrl)
+        btns.grid(row=1, column=0, columnspan=7, sticky="e", pady=(10, 0))
+
+        ttk.Button(btns, text="Calcola / Refresh", command=compute_and_plot).pack(side="right")
+        ttk.Button(btns, text="Chiudi", command=win.destroy).pack(side="right", padx=(0, 8))
+        ttk.Button(btns, text="K-Means", command=lambda: run_kmeans_and_plot()).pack(side="left", padx=(0, 8))
+        # calcolo iniziale automatico
+        compute_and_plot()
+
+        win.lift()
+        win.focus_force()
+    def open_pca_plot_window(self):
+        # se PCA non c'è o è vecchia, la ricalcolo
+        ok = self.compute_pca_on_features()
+        if not ok:
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("PCA scatter")
+        win.geometry("900x650")
+        win.transient(self.root)
+
+        top = ttk.Frame(win, padding=10)
+        top.pack(fill="x")
+
+        pc_list = list(self.pca_scores.columns)
+        x_var = tk.StringVar(value=pc_list[0])
+        y_var = tk.StringVar(value=pc_list[1] if len(pc_list) > 1 else pc_list[0])
+
+        ttk.Label(top, text="Asse X:").pack(side="left")
+        x_cb = ttk.Combobox(top, textvariable=x_var, values=pc_list, width=8, state="readonly")
+        x_cb.pack(side="left", padx=(6, 14))
+
+        ttk.Label(top, text="Asse Y:").pack(side="left")
+        y_cb = ttk.Combobox(top, textvariable=y_var, values=pc_list, width=8, state="readonly")
+        y_cb.pack(side="left", padx=(6, 14))
+
+        # area plot
+        fig = plt.Figure()
+        ax = fig.add_subplot(111)
+        canvas = FigureCanvasTkAgg(fig, master=win)
+        canvas_widget = canvas.get_tk_widget()
+        canvas_widget.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # scatter iniziale
+        def redraw():
+            ax.clear()
+            xcol = x_var.get()
+            ycol = y_var.get()
+
+            xs = self.pca_scores[xcol].values
+            ys = self.pca_scores[ycol].values
+
+            ax.scatter(xs, ys)
+            ax.set_xlabel(xcol)
+            ax.set_ylabel(ycol)
+            ax.set_title(f"{xcol} vs {ycol}")
+
+            canvas.draw_idle()
+
+        def on_change(_=None):
+            redraw()
+
+        x_cb.bind("<<ComboboxSelected>>", on_change)
+        y_cb.bind("<<ComboboxSelected>>", on_change)
+
+        redraw()
+        win.lift()
+        win.focus_force()
+    def compute_pca_on_features(self):
+        """
+        Calcola PCA sui vettori feature del dataset (escludendo thr_*, lbp_*, path).
+        Usa StandardScaler (consigliato).
+        """
+        if self.df_csv is None:
+            messagebox.showwarning("PCA", "Carica prima un CSV.")
+            return False
+
+        # colonne da escludere
+        exclude = {"path", "lbp_raggio", "lbp_punti",
+                   "thr_rmin", "thr_rmax", "thr_gmin", "thr_gmax", "thr_bmin", "thr_bmax"}
+
+        # prendo SOLO feature numeriche, escludendo parametri
+        cols = [c for c in self.df_csv.columns if c not in exclude]
+
+        if not cols:
+            messagebox.showwarning("PCA", "Non trovo feature nel CSV (solo path/parametri?).")
+            return False
+
+        # se alcune colonne sono stringhe, le forzo a numeriche (non convertibili -> NaN)
+        X = self.df_csv[cols].apply(pd.to_numeric, errors="coerce")
+
+        # tieni solo righe complete (oppure puoi imputare: qui faccio drop)
+        valid_mask = ~X.isna().any(axis=1)
+        Xv = X.loc[valid_mask].values
+
+        if Xv.shape[0] < 2:
+            messagebox.showwarning("PCA", "Troppe righe con NaN: non ho abbastanza campioni validi per PCA.")
+            return False
+
+        # numero componenti
+        ncomp = int(self.pca_n.get()) if self.use_pca.get() else 2
+        ncomp = max(2, ncomp)  # per plot 2D minimo 2
+        ncomp = min(ncomp, Xv.shape[1])  # non puoi avere più componenti delle feature
+
+        # standardizzazione (fondamentale per PCA sensata)
+        scaler = StandardScaler()
+        Xs = scaler.fit_transform(Xv)
+
+        pca = PCA(n_components=ncomp)
+        scores = pca.fit_transform(Xs)
+
+        # costruisco dataframe PC1..PCn per le righe valide
+        pc_cols = [f"PC{k}" for k in range(1, ncomp + 1)]
+        df_scores = pd.DataFrame(scores, columns=pc_cols, index=X.loc[valid_mask].index)
+
+        # salvo
+        self.pca_model = pca
+        self.pca_scores = df_scores
+        self.pca_feature_cols = cols
+
+        # se vuoi, puoi anche salvare scaler se ti serve dopo:
+        self.pca_scaler = scaler
+
+        return True
+
+
 
     def _auto_bind_threshold(self):
         # applica automaticamente il threshold quando cambiano i valori
