@@ -3,9 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 import mahotas
-
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 from pathlib import Path
 import pandas as pd
+from sklearn.cluster import KMeans
 
 def apri_immagine(path: str) -> Image.Image:
     """
@@ -227,6 +229,71 @@ def directory_immagini_to_csv(directory_path: str, recursive: bool = True, csv_n
     df.to_csv(out_csv, index=False)
 
     return df
+def compute_pca_on_df_vars(
+        df: pd.DataFrame,
+        *,
+        use_pca: bool = True,
+        n_components: int = 2,
+        exclude: set[str] | None = None,
+        require_complete_rows: bool = True,
+        min_samples: int = 2,
+):
+    """
+    PCA su DataFrame, senza classi: ritorna variabili.
+
+    Returns:
+      ok (bool),
+      msg (str),
+      pca (PCA|None),
+      scaler (StandardScaler|None),
+      scores_df (pd.DataFrame|None),
+      feature_cols (list[str]),
+      valid_mask (pd.Series|None),
+      explained_variance_ratio (np.ndarray|None)
+    """
+    if df is None or len(df) == 0:
+        return (False, "DataFrame vuoto o None.", None, None, None, [], None, None)
+
+    if exclude is None:
+        exclude = {
+            "path",
+            "lbp_raggio", "lbp_punti",
+            "thr_rmin", "thr_rmax", "thr_gmin", "thr_gmax", "thr_bmin", "thr_bmax",
+        }
+
+    cols = [c for c in df.columns if c not in exclude]
+    if not cols:
+        return (False, "Non trovo feature nel DataFrame (solo path/parametri?).", None, None, None, [], None, None)
+
+    X = df[cols].apply(pd.to_numeric, errors="coerce")
+
+    if require_complete_rows:
+        valid_mask = ~X.isna().any(axis=1)
+    else:
+        valid_mask = pd.Series([True] * len(X), index=X.index)
+
+    Xv = X.loc[valid_mask].values
+    if Xv.shape[0] < min_samples:
+        return (False, "Troppe righe con NaN: non ho abbastanza campioni validi per PCA.",
+                None, None, None, cols, valid_mask, None)
+
+    # numero componenti
+    ncomp = int(n_components) if use_pca else 2
+    ncomp = max(2, ncomp)  # per scatter 2D
+    ncomp = min(ncomp, Xv.shape[1])  # non più delle feature
+    if ncomp < 2:
+        return (False, "Troppe poche feature per fare PCA 2D.", None, None, None, cols, valid_mask, None)
+
+    scaler = StandardScaler()
+    Xs = scaler.fit_transform(Xv)
+
+    pca = PCA(n_components=ncomp)
+    scores = pca.fit_transform(Xs)
+
+    pc_cols = [f"PC{k}" for k in range(1, ncomp + 1)]
+    scores_df = pd.DataFrame(scores, columns=pc_cols, index=X.loc[valid_mask].index)
+
+    return (True, "OK", pca, scaler, scores_df, cols, valid_mask, pca.explained_variance_ratio_)
 def main():
 
     nomi_feature_haralick = [
@@ -258,7 +325,52 @@ def main():
             80, 200)
 
     x,y=estrazioni_feature_e_nomi(img,img_th,nomi_features_geometriche, nomi_features_haralick_canali,nomi_canali, raggio=4, punti=7)
+def run_kmeans_vars(
+    X,
+    *,
+    k: int,
+    n_init: int = 10,
+    random_state: int = 0,
+    min_samples: int = 2,
+):
+    """
+    KMeans standalone: ritorna solo variabili.
 
+    Input:
+      - X: array-like (n_samples, n_features) oppure DataFrame
+      - k: numero cluster
+
+    Returns:
+      ok (bool),
+      msg (str),
+      labels (np.ndarray|None),
+      km (KMeans|None),
+      Xc (np.ndarray|None)
+    """
+    if X is None:
+        return (False, "Input X is None.", None, None, None)
+
+    # converto a numpy
+    Xc = np.asarray(X)
+
+    if Xc.ndim != 2:
+        return (False, "X deve essere 2D (n_samples, n_features).", None, None, None)
+
+    n_samples = Xc.shape[0]
+    if n_samples < min_samples:
+        return (False, "Non ho abbastanza campioni per fare clustering.", None, None, Xc)
+
+    k = int(k)
+    if k < 2:
+        return (False, "k deve essere >= 2.", None, None, Xc)
+
+    if k > n_samples:
+        return (False, "k troppo grande rispetto al numero di campioni.", None, None, Xc)
+
+    km = KMeans(n_clusters=k, n_init=n_init, random_state=random_state)
+    labels = km.fit_predict(Xc)
+
+    return (True, "OK", labels, km, Xc)
 if __name__ == "__main__":
     directory_immagini_to_csv(r"C:\Users\Giovanni Gueltrini\Desktop\unibo\Tirocinio_cimbria\Prove_output_programma\dataset_prova")
     #main()
