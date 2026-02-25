@@ -13,11 +13,11 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 class App:
     def __init__(self, root):
-        self.root = root
+        self.root: tk.Tk = root
         root.title("CSV -> Threshold automatico -> Feature")
         root.geometry("1200x700")
 
-        self.input_csv_path = None # percorso della directory
+        self.input_csv_path: str = None # percorso della directory
         self.paths = []         # vettore dei percorsi di tutte le immagini
         self.i = -1        # variabile di controllo per la navigazione dei file dentro l'interfaccia
         self.img = None         #variabile globale dove allocare l'immagine
@@ -74,9 +74,7 @@ class App:
 
 
     def _ui(self):
-        """
-        Costruisce l'interfaccia grafica principale e inizializza i widget.
-        Crea/assegna: self.status, self.p1, self.p2, self.txt.
+        """ Costruisce la UI principale (toolbar, controlli threshold/LBP, preview immagini, textbox feature).
         """
         #  comandi principali + navigazione + stato
         # --- TOP BAR: sinistra | centro | destra (stabile)
@@ -190,7 +188,6 @@ class App:
 
         # Font monospazio per allineare meglio "name = value"
         self.txt.configure(font=("Consolas", 10))
-
     def _pca_window_build(self, title, with_kmeans):
         #Creo una finestra "figlia" dedicata alla PCA
         win = tk.Toplevel(self.root)
@@ -198,13 +195,11 @@ class App:
         win.geometry("950x700")
         win.transient(self.root)
         win.grab_set()
-
         #frame dei controlli sopra + frame del grafico sotto
         ctrl = ttk.Frame(win, padding=10)
         ctrl.pack(fill="x")
         plot_frm = ttk.Frame(win, padding=10)
         plot_frm.pack(fill="both", expand=True)
-
         #Variabili Tk che memorizzano la selezione dell’asse X/Y (PC1, PC2, ...)
         self._pca_x_var = tk.StringVar(value="PC1")
         self._pca_y_var = tk.StringVar(value="PC2")
@@ -252,6 +247,9 @@ class App:
         return win
 
     def _pca_refresh_pc_dropdowns(self):
+
+        # Aggiorna le combobox PC in base alle colonne disponibili in self.pca_scores.
+
         # Se non ho ancora calcolato la PCA (o il dataframe punteggi è vuoto) non posso aggiornare nulla
         if self.pca_scores is None or self.pca_scores.empty:
             return
@@ -272,6 +270,7 @@ class App:
             self._pca_y_var.set(pcs[1] if len(pcs) > 1 else pcs[0])
 
     def _pca_redraw(self):
+        # Calcola PCA internamente dal DataFrame (pulizia colonne, standardizzazione, fit PCA, scores).
 
         self._pca_refresh_pc_dropdowns()
         # Leggo quali colonne l’utente ha scelto per l’asse X e Y
@@ -299,6 +298,8 @@ class App:
         self._pca_canvas.draw_idle()
 
     def _pca_compute_inline(self):
+        # Calcola PCA internamente dal DataFrame (pulizia colonne, standardizzazione, fit PCA, scores).
+
         # Controllo : devo aver caricato un CSV in self.df_csv
         if self.df_csv is None:
             return False, "Carica prima un CSV."
@@ -350,6 +351,8 @@ class App:
         return True, ""
 
     def _pca_compute_from_helper(self):
+        # Calcola PCA usando la funzione helper esterna e salva risultati nello stato dell’app.
+
         #  Controllo: devo aver caricato il CSV in self.df_csv
         if self.df_csv is None:
             return False, "Carica prima un CSV."
@@ -383,6 +386,8 @@ class App:
         return True, ""
 
     def _pca_compute_refresh(self):
+        # Ricalcola PCA (inline o helper), resetta KMeans e aggiorna il grafico.
+
         #Scelgo quale "pipeline" PCA usare in base a come è stata aperta la finestra.
         #    - _pca_mode == "helper"  -> uso la funzione esterna compute_pca_on_df_vars (wrappa tutto)
         #    - altrimenti             -> uso la versione inline (calcolo PCA qui dentro la classe)
@@ -401,6 +406,8 @@ class App:
         self._pca_redraw()
 
     def _pca_run_kmeans(self):
+        # Esegue KMeans sui punteggi PCA e aggiorna lo scatter con colori per cluster.
+
         # Eseguo KMeans nello spazio PCA
         #    - k: numero cluster scelto dall’utente (spinbox)
         #    - n_init: quante inizializzazioni diverse provare (più alto = più robusto)

@@ -6,6 +6,12 @@ import mahotas
 import cv2
 import os
 from function  import  apri_immagine, threshold, estrazzione_features_geometriche, estrazione_feature_texturali
+from function import (
+    directory_immagini_to_csv,
+    compute_pca_on_df_vars,
+    run_kmeans_vars,
+    threshold,
+)
 @given(path=st.text(min_size=1).filter(lambda s: "\x00" not in s))
 def test_apri_immagine_file_inesistente_lancia_errore(path):
     # Evita collisioni con file reali: prefisso improbabile
@@ -138,3 +144,71 @@ def test_estrazione_feature_texturali(H, W, raggio, punti):
     var0 = float(np.var(roi0.flatten()))
     assert abs(har[0] - mean0) < 1e-9
     assert abs(har[1] - var0) < 1e-9
+
+    def test_directory_immagini_to_csv(tmp_path: Path) -> None:
+        # creo "immagini" finte: basta il file con estensione valida
+        (tmp_path / "a.jpg").write_bytes(b"fake")
+        (tmp_path / "b.png").write_bytes(b"fake")
+        (tmp_path / "nope.txt").write_text("x")
+
+        df = directory_immagini_to_csv(str(tmp_path), recursive=False, csv_name="out.csv")
+
+        assert list(df.columns) == ["path"]
+        assert len(df) == 2
+        assert (tmp_path / "out.csv").exists()
+
+    def test_compute_pca_on_df_vars() -> None:
+        df = pd.DataFrame({
+            "path": ["a", "b", "c", "d"],
+            "f1": [1.0, 2.0, 3.0, 4.0],
+            "f2": [4.0, 3.0, 2.0, 1.0],
+            "f3": [0.1, 0.2, 0.1, 0.2],
+        })
+
+        ok, msg, pca, scaler, scores_df, cols, valid_mask, evr = compute_pca_on_df_vars(
+            df, exclude={"path"}, use_pca=True, n_components=2
+        )
+
+        assert ok is True
+        assert msg == "OK"
+        assert scores_df is not None
+        assert list(scores_df.columns) == ["PC1", "PC2"]
+        assert len(scores_df) == 4
+        assert evr is not None
+        assert len(evr) == 2
+
+    def test_run_kmeans_vars() -> None:
+        X = np.array([
+            [0.0, 0.0],
+            [0.1, 0.0],
+            [10.0, 10.0],
+            [10.1, 9.9],
+        ])
+
+        ok, msg, labels, km, Xc = run_kmeans_vars(X, k=2, random_state=0)
+
+        assert ok is True
+        assert msg == "OK"
+        assert labels is not None
+        assert len(labels) == 4
+        assert set(labels) <= {0, 1}
+
+    def test_threshold() -> None:
+        # immagine 2x2 controllata
+        arr = np.array([
+            [[10, 10, 10], [200, 10, 10]],
+            [[10, 200, 10], [10, 10, 200]],
+        ], dtype=np.uint8)
+        img = Image.fromarray(arr, mode="RGB")
+
+        out = threshold(img, 0, 50, 0, 50, 0, 50)  # passa solo pixel (10,10,10)
+        out_arr = np.array(out, dtype=np.uint8)
+
+        # atteso: solo [0,0] bianco, gli altri neri
+        expected = np.array([
+            [255, 0],
+            [0, 0],
+        ], dtype=np.uint8)
+
+        assert out.mode == "L"
+        assert np.array_equal(out_arr, expected)
