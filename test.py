@@ -145,7 +145,7 @@ def test_estrazione_feature_texturali(H, W, raggio, punti):
     assert abs(har[0] - mean0) < 1e-9
     assert abs(har[1] - var0) < 1e-9
 
-    def test_directory_immagini_to_csv(tmp_path: Path) -> None:
+    def test_directory_immagini_to_csv(tmp_path) -> None:
         # creo "immagini" finte: basta il file con estensione valida
         (tmp_path / "a.jpg").write_bytes(b"fake")
         (tmp_path / "b.png").write_bytes(b"fake")

@@ -104,7 +104,7 @@ class App:
         ttk.Button(center_bar, text="Salva feature dataset", command=self.save_features_all).pack(side="left", padx=4,pady=(0, 4))  # salva nel csv le feature di tutte le immagini
 
         # Destra: Sottofinestra
-        ttk.Button(right_bar, text="Sottofinestra", command=self.open_subwindow).pack(side="left", padx=4, pady=(0, 4))
+        ttk.Button(right_bar, text="visualizza PCA", command=self.open_subwindow).pack(side="left", padx=4, pady=(0, 4))
 
         # Riga sotto: Prev / Next a sinistra, Status centrato
         nav = ttk.Frame(self.root, padding=(8, 0, 8, 8))
@@ -214,7 +214,7 @@ class App:
         self._pca_y_cb.grid(row=0, column=3, sticky="w", padx=(0, 14))
 
         # 5) Controllo "n componenti": spinbox mostra a self.pca_n
-        ttk.Label(ctrl, text="n componenti:").grid(row=0, column=4, sticky="e", padx=(0, 4))
+        ttk.Label(ctrl, text="numero componenti PCA:").grid(row=0, column=4, sticky="e", padx=(0, 4))
         self._pca_spn = ttk.Spinbox(ctrl, from_=2, to=999, textvariable=self.pca_n, width=6)
         self._pca_spn.grid(row=0, column=5, sticky="w", padx=(0, 14))
 
@@ -253,14 +253,11 @@ class App:
         # Se non ho ancora calcolato la PCA (o il dataframe punteggi è vuoto) non posso aggiornare nulla
         if self.pca_scores is None or self.pca_scores.empty:
             return
-
         # Ricavo la lista delle componenti disponibili: ["PC1", "PC2", ..., "PCn"]
         pcs = list(self.pca_scores.columns)
-
         # Aggiorno i valori mostrati nelle combobox X e Y con la lista reale delle PC calcolate
         self._pca_x_cb.configure(values=pcs)
         self._pca_y_cb.configure(values=pcs)
-
         # Se la selezione attuale non è più valida (es. prima avevo PC5 e ora ho solo PC1..PC3),
         # la resetto a un valore valido.
         if self._pca_x_var.get() not in pcs:
@@ -270,8 +267,11 @@ class App:
             self._pca_y_var.set(pcs[1] if len(pcs) > 1 else pcs[0])
 
     def _pca_redraw(self):
+        """
+        Aggiorna il grafico PCA in base alle componenti scelte.
+        Se presenti, usa anche i cluster KMeans per colorare i punti.
+        """
         # Calcola PCA internamente dal DataFrame (pulizia colonne, standardizzazione, fit PCA, scores).
-
         self._pca_refresh_pc_dropdowns()
         # Leggo quali colonne l’utente ha scelto per l’asse X e Y
         xcol, ycol = self._pca_x_var.get(), self._pca_y_var.get()
@@ -298,8 +298,10 @@ class App:
         self._pca_canvas.draw_idle()
 
     def _pca_compute_inline(self):
-        # Calcola PCA internamente dal DataFrame (pulizia colonne, standardizzazione, fit PCA, scores).
-
+        """
+        Calcola la PCA partendo dal DataFrame caricato e salva i risultati.
+        Controlla i dati, tiene solo le colonne numeriche valide e standardizza le feature.
+        """
         # Controllo : devo aver caricato un CSV in self.df_csv
         if self.df_csv is None:
             return False, "Carica prima un CSV."
@@ -351,8 +353,10 @@ class App:
         return True, ""
 
     def _pca_compute_from_helper(self):
-        # Calcola PCA usando la funzione helper esterna e salva risultati nello stato dell’app.
-
+        """
+        Calcola la PCA usando una funzione esterna e salva i risultati nell'app.
+        Se qualcosa non va, restituisce un messaggio di errore.
+        """
         #  Controllo: devo aver caricato il CSV in self.df_csv
         if self.df_csv is None:
             return False, "Carica prima un CSV."
@@ -386,8 +390,10 @@ class App:
         return True, ""
 
     def _pca_compute_refresh(self):
-        # Ricalcola PCA (inline o helper), resetta KMeans e aggiorna il grafico.
-
+        """
+            Ricalcola la PCA, azzera i cluster precedenti e aggiorna il grafico.
+            Se il calcolo fallisce, mostra un avviso e si ferma.
+            """
         #Scelgo quale "pipeline" PCA usare in base a come è stata aperta la finestra.
         #    - _pca_mode == "helper"  -> uso la funzione esterna compute_pca_on_df_vars (wrappa tutto)
         #    - altrimenti             -> uso la versione inline (calcolo PCA qui dentro la classe)
@@ -406,8 +412,10 @@ class App:
         self._pca_redraw()
 
     def _pca_run_kmeans(self):
-        # Esegue KMeans sui punteggi PCA e aggiorna lo scatter con colori per cluster.
-
+        """
+        Raggruppa i punti della PCA in cluster con KMeans.
+        In caso di errore mostra un messaggio, altrimenti ridisegna il plot.
+        """
         # Eseguo KMeans nello spazio PCA
         #    - k: numero cluster scelto dall’utente (spinbox)
         #    - n_init: quante inizializzazioni diverse provare (più alto = più robusto)
@@ -427,7 +435,9 @@ class App:
         self._pca_redraw()
 
     def open_subwindow(self):
-        #  Questa finestra usa la PCA "inline"
+        """
+        Apre la finestra della PCA, prepara i controlli e mostra il primo grafico.
+        """
         self._pca_mode = "inline"
         # Costruisco la finestra con controlli KMeans attivi
         self._pca_window_build("PCA + Plot", with_kmeans=True)
@@ -446,7 +456,7 @@ class App:
         for v in (self.rmin, self.rmax, self.gmin, self.gmax, self.bmin, self.bmax):
             v.trace_add("write", lambda *_: self.apply_threshold_safe())
     def _read_input_csv_as_df(self):
-        # legge il CSV di input e garantisce una colonna "path"
+        # legge il CSV di input
         df = pd.read_csv(self.input_csv_path, encoding="utf-8-sig")
         # Caso 1: esiste già la colonna path
         if "path" in df.columns:
@@ -503,7 +513,7 @@ class App:
         # Se non ho path caricati, non posso navigare
         if not self.paths:
             return
-        # Decremento l’indice ma non scendo sotto 0
+        # Decremento l’indice
         self.i = max(0, self.i - 1)
         # Carico l’immagine corrispondente al nuovo indice
         self.load_image()
@@ -512,13 +522,13 @@ class App:
         # Se non ho path caricati, non posso navigare
         if not self.paths:
             return
-        # Incremento l’indice ma non supero l’ultimo elemento
+        # Incremento l’indice
         self.i = min(len(self.paths) - 1, self.i + 1)
-        # Carico l’immagine corrispondente al nuovo indice
+        # Riarico
         self.load_image()
 
     def load_image(self):
-        #  controllo: devo avere una lista path e un indice valido
+        "carica l'immagine da elaborare"
         if not self.paths:
             return
         if self.i < 0 or self.i >= len(self.paths):
@@ -581,6 +591,10 @@ class App:
             self.tk2 = tkimg
 
     def load_threshold_from_csv_for_current_image(self):
+        """
+        Carica dal CSV le soglie associate all’immagine corrente.
+        Se trova i valori giusti, aggiorna l’interfaccia e applica il threshold.
+        """
         # controllo: devo avere un DataFrame caricato, una lista di path e un indice valido
         if self.df_csv is None or not self.paths:
             return False
@@ -697,6 +711,7 @@ class App:
                 f"\n[WARN] len(features)={len(features)} diverso da len(nomi)={len(nomi)}\n"
             )
     def save_features(self):
+        "salvo le feature nel csv"
         if self.last_features is None or self.last_feature_names is None:
             messagebox.showwarning("Salva", "Prima estrai le feature (pulsante 'Estrai feature').")
             return
@@ -749,70 +764,10 @@ class App:
         self.df_csv = df
         self.feature_cols = [c for c in self.df_csv.columns if c != "path"]
 
-    def save_features(self):
-        # Controllo: posso salvare solo se ho già estratto feature + nomi
-        if self.last_features is None or self.last_feature_names is None:
-            messagebox.showwarning("Salva", "Prima estrai le feature (pulsante 'Estrai feature').")
-            return
-        # Devo avere una lista path e un indice immagine valido
-        if not self.paths or self.i < 0 or self.i >= len(self.paths):
-            messagebox.showwarning("Salva", "Nessuna immagine selezionata.")
-            return
-        #  Devo sapere su quale CSV salvare (quello caricato in input)
-        if not self.input_csv_path:
-            messagebox.showwarning("Salva", "Prima carica un CSV di input.")
-            return
-        # Path dell’immagine corrente
-        img_path = self.paths[self.i]
-        #  Costruisco un dizionario "riga" con:
-        #    - tutte le feature (nome -> valore)
-        #    - path (chiave)
-        #    - parametri usati (threshold e LBP), utili per riprodurre l’estrazione
-        nomi = list(self.last_feature_names)
-        features = list(self.last_features)
-        n = min(len(features), len(nomi))
-        row_dict = {nomi[k]: features[k] for k in range(n)}
-        row_dict["path"] = img_path
-        # Parametri threshold correnti in UI
-        row_dict["thr_rmin"] = int(self.rmin.get())
-        row_dict["thr_rmax"] = int(self.rmax.get())
-        row_dict["thr_gmin"] = int(self.gmin.get())
-        row_dict["thr_gmax"] = int(self.gmax.get())
-        row_dict["thr_bmin"] = int(self.bmin.get())
-        row_dict["thr_bmax"] = int(self.bmax.get())
-        # Parametri LBP correnti in UI
-        row_dict["lbp_raggio"] = int(self.raggio.get())
-        row_dict["lbp_punti"] = int(self.punti.get())
-        try:
-            # Rileggo il CSV come DataFrame
-            df = self._read_input_csv_as_df()
-            #  Creo un DataFrame di una sola riga con le feature da salvare
-            feat_df = pd.DataFrame([row_dict])
-            # Merge su "path": aggiunge nuove colonne o aggiorna quelle esistenti
-            df = df.merge(feat_df, on="path", how="left", suffixes=("", "_new"))
 
-            #  Se ci sono colonne , vuol dire che sto aggiornando valori già esistenti sovrascrivo la colonna originale con quella nuova e poi elimino *_new.
-            for c in feat_df.columns:
-                if c == "path":
-                    continue
-                newc = f"{c}_new"
-                if newc in df.columns:
-                    df[c] = df[newc]
-                    df.drop(columns=[newc], inplace=True)
-
-            # 1Scrivo  il CSV aggiornato
-            df.to_csv(self.input_csv_path, index=False, encoding="utf-8-sig")
-            #  Feedback utente
-            messagebox.showinfo("Salvato", f"Feature salvate nel CSV di input:\n{self.input_csv_path}")
-        except Exception as e:
-            # Se qualcosa va storto (file aperto, permessi, csv corrotto, ecc.)
-            messagebox.showerror("Errore", f"Impossibile salvare nel CSV di input:\n{e}")
-            return
-        # Aggiorno stato interno: df_csv e lista colonne feature
-        self.df_csv = df
-        self.feature_cols = [c for c in self.df_csv.columns if c != "path"]
 
     def save_features_all(self):
+        "salva le feature di tutte le immagini del csv"
         if not self.paths:
             messagebox.showwarning("Dataset", "Prima carica un CSV con i path.")
             return

@@ -9,19 +9,6 @@ from pathlib import Path
 import pandas as pd
 from sklearn.cluster import KMeans
 
-def apri_immagine(path: str) -> Image.Image:
-    """
-    Opens an image from a path and converts it to RGB.
-    Works with any format supported by Pillow.
-    (PNG, JPEG, BMP, TIFF, WEBP, GIF, ecc.).
-    """
-    try:
-        with Image.open(path) as im:
-            return im.convert("RGB")
-    except FileNotFoundError:
-        raise FileNotFoundError(f"File non trovato: {path}")
-    except UnidentifiedImageError:
-        raise ValueError(f"Formato non supportato o file corrotto: {path}")
 
 def threshold(
     img: Image.Image,
@@ -62,7 +49,7 @@ def estrazzione_features_geometriche(mask: Image.Image) -> np.ndarray:
     """
     Estrae feature geometriche da una maschera binaria.
 
-    Feature ritornate (ordine):
+    Feature ritornate:
     [height, width, area, aspect_ratio, extent, solidity, equivalent_diameter, hu1..hu7]
     """
     # PIL -> numpy grayscale uint8
@@ -294,37 +281,6 @@ def compute_pca_on_df_vars(
     scores_df = pd.DataFrame(scores, columns=pc_cols, index=X.loc[valid_mask].index)
 
     return (True, "OK", pca, scaler, scores_df, cols, valid_mask, pca.explained_variance_ratio_)
-def main():
-
-    nomi_feature_haralick = [
-        "mean_color",
-        "variance_color",
-        "Angular Second Moment (Energy)",
-        "Contrast",
-        "Correlation",
-        "Variance",
-        "Inverse Difference Moment (Homogeneity)",
-        "Sum Average",
-        "Sum Variance",
-        "Sum Entropy",
-        "Entropy",
-        "Difference Variance",
-        "Difference Entropy",
-        "Information Measure of Correlation 1",
-        "Information Measure of Correlation 2"]
-    nomi_features_haralick_canali=[]
-    nomi_canali=["Red", "Green", "Blue"]
-    for nome in nomi_canali:
-        nomi_features_haralick_canali = np.concatenate([nomi_features_haralick_canali,[f"{n}_{nome}" for n in nomi_feature_haralick]])
-
-    img=apri_immagine(r"C:\Users\Giovanni Gueltrini\Desktop\unibo\Tirocinio_cimbria\Prove_output_programma\dataset_prova\immagini_2.png")
-    img_th=threshold(
-            img,
-            0, 50,
-            0,50,
-            80, 200)
-
-    x,y=estrazioni_feature_e_nomi(img,img_th,nomi_features_geometriche, nomi_features_haralick_canali,nomi_canali, raggio=4, punti=7)
 def run_kmeans_vars(
     X,
     *,
@@ -371,6 +327,38 @@ def run_kmeans_vars(
     labels = km.fit_predict(Xc)
 
     return (True, "OK", labels, km, Xc)
+def main():
+
+    nomi_feature_haralick = [
+        "mean_color",
+        "variance_color",
+        "Angular Second Moment (Energy)",
+        "Contrast",
+        "Correlation",
+        "Variance",
+        "Inverse Difference Moment (Homogeneity)",
+        "Sum Average",
+        "Sum Variance",
+        "Sum Entropy",
+        "Entropy",
+        "Difference Variance",
+        "Difference Entropy",
+        "Information Measure of Correlation 1",
+        "Information Measure of Correlation 2"]
+    nomi_features_haralick_canali=[]
+    nomi_canali=["Red", "Green", "Blue"]
+    for nome in nomi_canali:
+        nomi_features_haralick_canali = np.concatenate([nomi_features_haralick_canali,[f"{n}_{nome}" for n in nomi_feature_haralick]])
+
+    img=apri_immagine(r"C:\Users\Giovanni Gueltrini\Desktop\unibo\Tirocinio_cimbria\Prove_output_programma\dataset_prova\immagini_2.png")
+    img_th=threshold(
+            img,
+            0, 50,
+            0,50,
+            80, 200)
+
+    x,y=estrazioni_feature_e_nomi(img,img_th,nomi_features_geometriche, nomi_features_haralick_canali,nomi_canali, raggio=4, punti=7)
+
 if __name__ == "__main__":
     directory_immagini_to_csv(r"C:\Users\Giovanni Gueltrini\Desktop\unibo\Tirocinio_cimbria\Prove_output_programma\dataset_prova")
     #main()
