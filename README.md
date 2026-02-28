@@ -24,3 +24,22 @@ nel lato destro ci sarà il bottone **visualizza PCA**
 Dopo aver cliccato il pulsante, si aprirà una nuova finestra dedicata alla visualizzazione dei risultati della PCA. Tramite i menu “Asse X” e “Asse Y” sarà possibile selezionare quali componenti principali rappresentare nel grafico. Inoltre, attraverso l’apposito menu a tendina, l’utente potrà modificare il numero di componenti della PCA da calcolare. Ogni volta che questo valore viene aggiornato, sarà necessario premere nuovamente il pulsante “Calcola” per rielaborare l’analisi e aggiornare la visualizzazione.
 
 Premendo invece il pulsante “K-means”, l’applicazione eseguirà il clustering dei dati, generando un numero di cluster pari al valore selezionato nel menu a tendina “k-cluster”. I cluster ottenuti verranno poi rappresentati nel grafico sottostante mediante una diversa colorazione dei punti, così da rendere immediatamente visibile l’appartenenza di ciascuna osservazione al relativo gruppo.
+
+# Utilizzo tramite interprete Python
+
+Il programma può essere eseguito direttamente a partire dal codice sorgente mediante un interprete Python. In questo caso, è innanzitutto necessario scaricare o clonare il progetto nella propria macchina e posizionarsi, tramite terminale, nella cartella principale del repository.
+
+Si consiglia di creare un ambiente virtuale dedicato, così da isolare le dipendenze del progetto dal resto delle librerie installate nel sistema. Una volta creato e attivato l’ambiente virtuale, sarà possibile installare tutti i pacchetti necessari mediante il file requirements.txt, eseguendo il comando:
+  | pip install -r requirements.txt
+  
+Completata l’installazione delle dipendenze, il programma potrà essere avviato eseguendo il file principale dell’applicazione, ad esempio:
+
+L’interfaccia grafica verrà quindi aperta e sarà possibile utilizzare il programma caricando un file CSV compatibile con la struttura richiesta. Questa modalità è particolarmente indicata per utenti che desiderano esaminare, modificare o sviluppare ulteriormente il codice sorgente dell’applicazione.
+
+# Utilizzo tramite file eseguibile
+
+In alternativa, il programma può essere utilizzato tramite un file eseguibile .exe, senza la necessità di installare manualmente Python o le librerie richieste dal progetto. In questo caso, sarà sufficiente scaricare la cartella contenente l’eseguibile e avviare il programma facendo doppio clic sul file corrispondente.
+
+Una volta aperta l’interfaccia grafica, l’utente potrà caricare il file CSV contenente i percorsi delle immagini da analizzare e utilizzare normalmente tutte le funzionalità del software, inclusi il threshold, l’estrazione delle feature, il salvataggio dei descrittori e la visualizzazione della PCA con clustering K-Means.
+
+È tuttavia importante osservare che l’eseguibile non sostituisce i dati di input necessari al funzionamento del programma. Di conseguenza, per un utilizzo corretto sarà comunque necessario disporre del file CSV e delle immagini a esso associate. Inoltre, i percorsi riportati nel CSV dovranno essere validi anche nel computer in cui il programma viene eseguito; in caso contrario, le immagini non potranno essere caricate correttamente.
