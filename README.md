@@ -28,12 +28,18 @@ Premendo invece il pulsante “K-means”, l’applicazione eseguirà il cluster
 # Utilizzo tramite interprete Python
 
 Il programma può essere eseguito direttamente a partire dal codice sorgente mediante un interprete Python. In questo caso, è innanzitutto necessario scaricare o clonare il progetto nella propria macchina e posizionarsi, tramite terminale, nella cartella principale del repository.
-
-Si consiglia di creare un ambiente virtuale dedicato, così da isolare le dipendenze del progetto dal resto delle librerie installate nel sistema. Una volta creato e attivato l’ambiente virtuale, sarà possibile installare tutti i pacchetti necessari mediante il file requirements.txt, eseguendo il comando:
-  | pip install -r requirements.txt
-  
+```bash
+git clone https://github.com/GiovanniGueltrini/ObjectFeatureExtractor.git
+cd ObjectFeatureExtractor
+```
+Una volta creato e attivato l’ambiente virtuale, sarà possibile installare tutti i pacchetti necessari mediante il file requirements.txt, eseguendo il comando:
+```bash
+pip install -r requirements.txt
+```
 Completata l’installazione delle dipendenze, il programma potrà essere avviato eseguendo il file principale dell’applicazione, ad esempio:
-
+```bash
+python Dashboard.py
+```
 L’interfaccia grafica verrà quindi aperta e sarà possibile utilizzare il programma caricando un file CSV compatibile con la struttura richiesta. Questa modalità è particolarmente indicata per utenti che desiderano esaminare, modificare o sviluppare ulteriormente il codice sorgente dell’applicazione.
 
 # Utilizzo tramite file eseguibile
