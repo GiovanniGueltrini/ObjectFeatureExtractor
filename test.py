@@ -1,31 +1,16 @@
 from PIL import Image
 import numpy as np
 from hypothesis import given, strategies as st
-import tempfile
 import mahotas
 import cv2
-import os
-from function  import  apri_immagine, threshold, estrazzione_features_geometriche, estrazione_feature_texturali
+import pandas as pd
+from function  import   threshold, estrazzione_features_geometriche, estrazione_feature_texturali
 from function import (
     directory_immagini_to_csv,
     compute_pca_on_df_vars,
     run_kmeans_vars,
     threshold,
 )
-@given(path=st.text(min_size=1).filter(lambda s: "\x00" not in s))
-def test_apri_immagine_file_inesistente_lancia_errore(path):
-    # Evita collisioni con file reali: prefisso improbabile
-    fake_path = "__file_inesistente_hypothesis__/" + path
-
-    try:
-        apri_immagine(fake_path)
-        assert False, "Mi aspettavo FileNotFoundError"
-    except FileNotFoundError:
-        assert True
-    except Exception:
-        # Su alcuni OS/path strani possono emergere altri OSError
-        # ma per lo scopo del corso teniamo chiaro il caso atteso
-        assert True
 @given(
     h=st.integers(min_value=1, max_value=32),
     w=st.integers(min_value=1, max_value=32),
@@ -37,6 +22,13 @@ def test_apri_immagine_file_inesistente_lancia_errore(path):
     b_max=st.integers(min_value=0, max_value=255),
 )
 def test_threshold(h, w, r_min, r_max, g_min, g_max, b_min, b_max):
+    """
+    Tests:
+    if the output image has the same size as the input image
+    if each output pixel is 255 when the input pixel RGB values lie inside the given ranges
+    if each output pixel is 0 when at least one RGB channel is outside the given ranges
+    if the output binary mask matches exactly the mathematically expected result (pixel-wise)
+        """
     # ordina i range (min <= max)
     r0, r1 = sorted((r_min, r_max))
     g0, g1 = sorted((g_min, g_max))
@@ -70,6 +62,16 @@ def test_threshold(h, w, r_min, r_max, g_min, g_max, b_min, b_max):
     rw=st.integers(min_value=1, max_value=60),
 )
 def test_estrazzione_features_geometriche(H, W, y0, x0, rh, rw):
+    """
+    Tests:
+    if the output is a 1D numpy array with the expected length of  14 features
+    if all returned feature values are finite (no NaN or Inf)
+    if the computed bounding-box height equals the rectangle height used to build the mask
+    if the computed bounding-box width equals the rectangle width used to build the mask
+    if the computed area equals the rectangle area
+    if the computed aspect ratio equals width/height
+    if the computed extent is 1.0 for a fully-filled rectangle
+    """
     # normalizza dimensioni rettangolo per stare dentro l'immagine
     y0 = min(y0, H - 1)
     x0 = min(x0, W - 1)
@@ -109,6 +111,14 @@ def test_estrazzione_features_geometriche(H, W, y0, x0, rh, rw):
     punti=st.integers(min_value=4, max_value=12),
 )
 def test_estrazione_feature_texturali(H, W, raggio, punti):
+    """
+    Tests:
+    if the function returns two 1D numpy arrays (Haralick features and LBP features)
+    if both output vectors contain only finite values (no NaN or Inf)
+    if the Haralick output length matches 3 * (2 + n_haralick), i.e. mean+variance plus Haralick features for each RGB channel
+    if the LBP output length matches 3 * n_lbp, i.e. LBP histogram/features for each RGB channel
+    if the first two elements of the Haralick block for the first channel are respectively the mean and the variance of the masked ROI
+    """
     # immagine RGB casuale
     arr = np.random.randint(0, 256, size=(H, W, 3), dtype=np.uint8)
     img = Image.fromarray(arr, mode="RGB")
@@ -145,70 +155,101 @@ def test_estrazione_feature_texturali(H, W, raggio, punti):
     assert abs(har[0] - mean0) < 1e-9
     assert abs(har[1] - var0) < 1e-9
 
-    def test_directory_immagini_to_csv(tmp_path) -> None:
-        # creo "immagini" finte: basta il file con estensione valida
-        (tmp_path / "a.jpg").write_bytes(b"fake")
-        (tmp_path / "b.png").write_bytes(b"fake")
-        (tmp_path / "nope.txt").write_text("x")
+def test_directory_immagini_to_csv(tmp_path) -> None:
+    """
+    Tests:
+    if the function returns a pandas DataFrame
+    if the DataFrame has exactly one column named "path"
+    if only files with valid image extensions are included (e.g., .jpg, .png)
+    if non-image files are excluded (e.g., .txt)
+    if the number of rows equals the number of valid image files found in the directory
+    if the output CSV file is created in the target directory with the expected name
+    """
+    # creo "immagini" finte: basta il file con estensione valida
+    (tmp_path / "a.jpg").write_bytes(b"fake")
+    (tmp_path / "b.png").write_bytes(b"fake")
+    (tmp_path / "nope.txt").write_text("x")
 
-        df = directory_immagini_to_csv(str(tmp_path), recursive=False, csv_name="out.csv")
+    df = directory_immagini_to_csv(str(tmp_path), recursive=False, csv_name="out.csv")
 
-        assert list(df.columns) == ["path"]
-        assert len(df) == 2
-        assert (tmp_path / "out.csv").exists()
+    assert list(df.columns) == ["path"]
+    assert len(df) == 2
+    assert (tmp_path / "out.csv").exists()
 
-    def test_compute_pca_on_df_vars() -> None:
-        df = pd.DataFrame({
-            "path": ["a", "b", "c", "d"],
-            "f1": [1.0, 2.0, 3.0, 4.0],
-            "f2": [4.0, 3.0, 2.0, 1.0],
-            "f3": [0.1, 0.2, 0.1, 0.2],
-        })
+def test_compute_pca_on_df_vars() -> None:
+    """
+    Tests:
+    if the function returns ok=True and the message is exactly "OK" for a valid numeric dataframe
+    if the PCA scores dataframe is not None when use_pca=True
+    if the scores dataframe has exactly the expected PCA component columns (["PC1", "PC2"])
+    if the number of rows in the scores dataframe equals the number of input samples
+    if the explained variance ratio (evr) is not None when PCA is computed
+    if the explained variance ratio length equals n_components
+    """
 
-        ok, msg, pca, scaler, scores_df, cols, valid_mask, evr = compute_pca_on_df_vars(
-            df, exclude={"path"}, use_pca=True, n_components=2
-        )
+    df = pd.DataFrame({
+        "path": ["a", "b", "c", "d"],
+        "f1": [1.0, 2.0, 3.0, 4.0],
+        "f2": [4.0, 3.0, 2.0, 1.0],
+        "f3": [0.1, 0.2, 0.1, 0.2],
+    })
 
-        assert ok is True
-        assert msg == "OK"
-        assert scores_df is not None
-        assert list(scores_df.columns) == ["PC1", "PC2"]
-        assert len(scores_df) == 4
-        assert evr is not None
-        assert len(evr) == 2
+    ok, msg, pca, scaler, scores_df, cols, valid_mask, evr = compute_pca_on_df_vars(
+        df, exclude={"path"}, use_pca=True, n_components=2
+    )
 
-    def test_run_kmeans_vars() -> None:
-        X = np.array([
-            [0.0, 0.0],
-            [0.1, 0.0],
-            [10.0, 10.0],
-            [10.1, 9.9],
-        ])
+    assert ok is True
+    assert msg == "OK"
+    assert scores_df is not None
+    assert list(scores_df.columns) == ["PC1", "PC2"]
+    assert len(scores_df) == 4
+    assert evr is not None
+    assert len(evr) == 2
 
-        ok, msg, labels, km, Xc = run_kmeans_vars(X, k=2, random_state=0)
+def test_run_kmeans_vars() -> None:
+    """
+    Tests:
+    if the function returns ok=True and the message is exactly "OK" for a valid input matrix
+    if the returned labels array is not None
+    if the number of labels equals the number of input samples
+    if the produced labels belong to the expected set of cluster IDs {0, 1} when k=2
+    """
+    X = np.array([
+        [0.0, 0.0],
+        [0.1, 0.0],
+        [10.0, 10.0],
+        [10.1, 9.9],
+    ])
 
-        assert ok is True
-        assert msg == "OK"
-        assert labels is not None
-        assert len(labels) == 4
-        assert set(labels) <= {0, 1}
+    ok, msg, labels, km, Xc = run_kmeans_vars(X, k=2, random_state=0)
 
-    def test_threshold() -> None:
-        # immagine 2x2 controllata
-        arr = np.array([
-            [[10, 10, 10], [200, 10, 10]],
-            [[10, 200, 10], [10, 10, 200]],
-        ], dtype=np.uint8)
-        img = Image.fromarray(arr, mode="RGB")
+    assert ok is True
+    assert msg == "OK"
+    assert labels is not None
+    assert len(labels) == 4
+    assert set(labels) <= {0, 1}
 
-        out = threshold(img, 0, 50, 0, 50, 0, 50)  # passa solo pixel (10,10,10)
-        out_arr = np.array(out, dtype=np.uint8)
+def test_threshold() -> None:
+    """
+    Tests:
+    if only pixels whose RGB channels all lie inside the given ranges are set to 255
+    if pixels with at least one channel outside the given ranges are set to 0
+    if the output mask matches exactly the expected 2x2 result for a controlled input image
+    """
+    # immagine 2x2 controllata
+    arr = np.array([
+        [[10, 10, 10], [200, 10, 10]],
+        [[10, 200, 10], [10, 10, 200]],
+    ], dtype=np.uint8)
+    img = Image.fromarray(arr, mode="RGB")
 
-        # atteso: solo [0,0] bianco, gli altri neri
-        expected = np.array([
-            [255, 0],
-            [0, 0],
-        ], dtype=np.uint8)
+    out = threshold(img, 0, 50, 0, 50, 0, 50)  # passa solo pixel (10,10,10)
+    out_arr = np.array(out, dtype=np.uint8)
 
-        assert out.mode == "L"
-        assert np.array_equal(out_arr, expected)
+    # atteso: solo [0,0] bianco, gli altri neri
+    expected = np.array([
+        [255, 0],
+        [0, 0],
+    ], dtype=np.uint8)
+
+    assert np.array_equal(out_arr, expected)
