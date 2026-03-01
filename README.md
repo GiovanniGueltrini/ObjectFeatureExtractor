@@ -28,7 +28,9 @@ A queste si aggiungono le feature di [Haralick](https://mahotas.readthedocs.io/e
 Una volta aperta la finestra dedicata alla visualizzazione, è possibile applicare la **PCA** al vettore delle feature estratte in precedenza. L’utente può scegliere il numero di componenti principali da calcolare e selezionare quali due componenti rappresentare nel grafico, così da visualizzarle tra loro in un piano bidimensionale. Successivamente, sui punteggi ottenuti dalla PCA, è possibile applicare un algoritmo di clustering, nello specifico il **K-Means**, al fine di suddividere i dati in gruppi. L’appartenenza di ciascun punto al relativo cluster viene quindi mostrata graficamente mediante l’uso di colori differenti.
 
 # Come usarlo
-Per utilizzare correttamente l’applicazione è innanzitutto necessario disporre di un file CSV strutturato in modo opportuno, contenente i percorsi delle immagini da analizzare.
+Per utilizzare correttamente l’applicazione è necessario disporre di un file CSV strutturato in modo opportuno, contenente i percorsi delle immagini da analizzare.
+Un esempio di struttura di cartella e del relativo file CSV è disponibile nella cartella (dataset_prova)[dataset_prova].
+Non è necessario che tutte le immagini siano contenute nella stessa directory: è sufficiente che il file CSV includa i percorsi corretti di tutte le immagini che si desidera elaborare.
 Nel caso in cui tutte le immagini siano raccolte all’interno di una singola cartella, è possibile generare automaticamente tale file mediante la funzione `directory_immagini_to_csv`. Sarà sufficiente richiamare la funzione fornendo in input il percorso della cartella contenente le immagini, così da ottenere un CSV compatibile con il programma
 ```bash
 path="your_own_path"
