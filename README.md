@@ -47,7 +47,7 @@ Dopo aver cliccato il pulsante, si aprirà una nuova finestra dedicata alla visu
 
 Premendo invece il pulsante “K-means”, l’applicazione eseguirà il clustering dei dati, generando un numero di cluster pari al valore selezionato nel menu a tendina “k-cluster”. I cluster ottenuti verranno poi rappresentati nel grafico sottostante mediante una diversa colorazione dei punti, così da rendere immediatamente visibile l’appartenenza di ciascuna osservazione al relativo gruppo.
 
-# Utilizzo tramite interprete Python
+# Utilizzo tramite interprete Python(Consigliato per Linux)
 
 Il programma può essere eseguito direttamente a partire dal codice sorgente mediante un interprete Python. In questo caso, è innanzitutto necessario scaricare o clonare il progetto nella propria macchina e posizionarsi, tramite terminale, nella cartella principale del repository.
 ```bash
