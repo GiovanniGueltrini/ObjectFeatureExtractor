@@ -71,3 +71,10 @@ In alternativa, il programma può essere utilizzato tramite un file eseguibile .
 Una volta aperta l’interfaccia grafica, l’utente potrà caricare il file CSV contenente i percorsi delle immagini da analizzare e utilizzare normalmente tutte le funzionalità del software, inclusi il threshold, l’estrazione delle feature, il salvataggio dei descrittori e la visualizzazione della PCA con clustering K-Means.
 
 È tuttavia importante osservare che l’eseguibile non sostituisce i dati di input necessari al funzionamento del programma. Di conseguenza, per un utilizzo corretto sarà comunque necessario disporre del file CSV e delle immagini a esso associate. Inoltre, i percorsi riportati nel CSV dovranno essere validi anche nel computer in cui il programma viene eseguito; in caso contrario, le immagini non potranno essere caricate correttamente.
+
+### GUI dependency (Tkinter)
+
+This project uses **Tkinter** (Python standard library).  
+- **Windows/macOS**: usually included with Python  
+- **Ubuntu/Debian**: `sudo apt-get install python3-tk`  
+- Check: `python -c "import tkinter; print('tkinter OK')"`
