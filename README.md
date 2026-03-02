@@ -74,7 +74,7 @@ This project uses **Tkinter** (Python standard library).
 - **Windows/macOS**: usually included with Python  
 - **Ubuntu/Debian**: `sudo apt-get install python3-tk`  
 - Check: `python -c "import tkinter; print('tkinter OK')"`
-- 
+  
 # Use via executable file(solo Windows)
 Alternatively, the program can be used via an .exe executable file, without the need to manually install Python or the libraries required by the project. 
 In this case, simply download the dist.zip file from the Release section, extract its contents to a local folder, and start the program by double-clicking on the .exe file inside the extracted folder.
