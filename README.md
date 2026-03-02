@@ -66,6 +66,9 @@ python Dashboard.py
 ```
 The graphical interface will then open and you can use the program by loading a CSV file compatible with the required structure. This mode is suitable for users who wish to examine, modify, or further develop the application's source code.
 
+Compatibility with macOS has not been directly verified. The program is developed in Python with cross-platform libraries, so it may also be executable on macOS via a Python interpreter, but support is not currently guaranteed.
+
+
 ### GUI dependency (Tkinter)
 This project uses **Tkinter** (Python standard library).  
 - **Windows/macOS**: usually included with Python  
@@ -79,5 +82,4 @@ In this case, simply download the dist.zip file from the Release section, extrac
 Once the graphical interface is open, the user can load the CSV file containing the paths of the images to be analyzed and use all the software's features as normal, including thresholding, feature extraction, descriptor saving, and PCA visualization with K-Means clustering.
 
 However, it is important to note that the executable file does not replace the input data required for the program to function. Consequently, for correct use, it will still be necessary to have the CSV file and the images associated with it. In addition, the paths listed in the CSV file must also be valid on the computer where the program is running; otherwise, the images will not be able to be loaded correctly.
-
 
