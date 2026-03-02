@@ -1,5 +1,5 @@
 # Struttura e funzionalità principali dell’applicazione
-Questo programma implementa un’interfaccia grafica in Tkinter finalizzata all’analisi di immagini e alla visualizzazione delle sue caratteristiche.
+Questo programma implementa un’interfaccia grafica in Tkinter per l’analisi di immagini e la visualizzazione delle caratteristiche estratte.
 L’applicazione consente di caricare un dataset di immagini, visualizzare per ciascun elemento sia l’immagine originale sia la corrispondente maschera binaria ottenuta tramite threshold RGB, e modificare in modo interattivo i parametri di sogliatura. 
 Inoltre, permette l’estrazione di feature geometriche e testurali, il salvataggio dei descrittori calcolati direttamente nel CSV di input e l’elaborazione automatica dell’intero dataset.
 
