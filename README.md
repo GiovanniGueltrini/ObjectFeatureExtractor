@@ -67,14 +67,12 @@ python Dashboard.py
 The graphical interface will then open and you can use the program by loading a CSV file compatible with the required structure. This mode is suitable for users who wish to examine, modify, or further develop the application's source code.
 
 ### GUI dependency (Tkinter)
-
 This project uses **Tkinter** (Python standard library).  
 - **Windows/macOS**: usually included with Python  
 - **Ubuntu/Debian**: `sudo apt-get install python3-tk`  
 - Check: `python -c "import tkinter; print('tkinter OK')"`
 - 
-# Use via executable file
-
+# Use via executable file(solo Windows)
 Alternatively, the program can be used via an .exe executable file, without the need to manually install Python or the libraries required by the project. 
 In this case, simply download the dist.zip file from the Release section, extract its contents to a local folder, and start the program by double-clicking on the .exe file inside the extracted folder.
 
