@@ -2,6 +2,7 @@
 Questo programma implementa un’interfaccia grafica in Tkinter finalizzata all’analisi di immagini e alla visualizzazione delle sue carattereistiche.
 L’applicazione consente di caricare un dataset di immagini, visualizzare per ciascun elemento sia l’immagine originale sia la corrispondente maschera binaria ottenuta tramite threshold RGB, e modificare in modo interattivo i parametri di sogliatura. 
 Inoltre, permette l’estrazione di feature geometriche e testurali, il salvataggio dei descrittori calcolati direttamente nel CSV di input e l’elaborazione automatica dell’intero dataset.
+
 Il programma integra anche una sezione dedicata all’analisi esplorativa dei dati, basata sulla Principal Component Analysis (PCA) delle feature estratte e sull’applicazione dell’algoritmo K-Means ai punteggi PCA, al fine di evidenziare eventuali strutture o raggruppamenti presenti nei dati. 
 
 Nel complesso, lo strumento è pensato per supportare la costruzione, l’organizzazione e una prima analisi quantitativa di dataset di feature ricavate da immagini.
@@ -18,7 +19,8 @@ Le feature geometriche estratte sono molteplici e descrivono sia la dimensione s
 - solidity: rapporto tra area della regione e area del suo inviluppo convesso , utile per quantificare concavità e irregolarità;
 A questi si aggiungono i 7 momenti invarianti di [Hu](https://it.wikipedia.org/wiki/Momento_(elaborazione_delle_immagini)) (hu1–hu7), che costituiscono descrittori di forma invarianti a traslazione, rotazione e (in prima approssimazione) scala, e consentono quindi un confronto più robusto tra oggetti con orientamento diverso.
 
-Le feature testurali descrivono la distribuzione dei livelli di intensità (e quindi la “granularità” e l’eterogeneità) della regione segmentata. Nel programma sono calcolate sulla ROI definita dalla maschera binaria e includono:
+Le feature testurali descrivono la distribuzione dei livelli di intensità, quindi la “granularità” e l’eterogeneità, della regione segmentata.
+Nel programma sono calcolate sulla ROI definita dalla maschera binaria e includono:
 - mean_color: media dei valori di intensità nella ROI (per canale);
 - variance_color: varianza dei valori di intensità nella ROI (per canale);
 
@@ -36,11 +38,10 @@ Nel caso in cui tutte le immagini siano raccolte all’interno di una singola ca
 path="your_own_path"
 directory_immagini_to_csv(path)
 ```
-Potete trovare un esempio di cartella in 
-Una volta caricato il file CSV, sarà possibile applicare il threshold all’immagine corrente; il risultato della sogliatura verrà visualizzato sotto forma di maschera binaria nel pannello posto a sinistra dell’interfaccia. Accanto ai parametri del threshold saranno inoltre presenti due valori dedicati alla definizione dei parametri di una specifica feature testurale, il Local Binary Pattern (LBP).
+Una volta caricato il file CSV, sarà possibile applicare il threshold all’immagine corrente; il risultato della sogliatura verrà visualizzato sotto forma di maschera binaria nel pannello posto a sinistra dell’interfaccia. Accanto ai parametri del threshold saranno inoltre presenti due valori dedicati alla definizione dei parametri di una specifica feature testurale, il Local Binary Pattern.
 
 Nella barra principale superiore sarà presente il pulsante “Carica CSV”, che consentirà di navigare all’interno del filesystem e selezionare il file CSV di input. Nella parte centrale della stessa barra saranno invece disponibili tre pulsanti dedicati alla gestione delle feature. Il pulsante “Estrai feature” permetterà di calcolare e visualizzare le feature relative all’immagine correntemente selezionata. Il pulsante “Salva feature” consentirà di memorizzare nel file CSV le feature associate alla sola immagine corrente. Infine, il pulsante “Salva feature dataset” eseguirà l’estrazione e il salvataggio delle feature per l’intero insieme di immagini contenute nel dataset.**
-nel lato destro ci sarà il bottone **visualizza PCA**.
+Nel lato destro ci sarà il bottone **visualizza PCA**.
 
 #### Visualizza PCA
 Dopo aver cliccato il pulsante, si aprirà una nuova finestra dedicata alla visualizzazione dei risultati della PCA. Tramite i menu “Asse X” e “Asse Y” sarà possibile selezionare quali componenti principali rappresentare nel grafico. Inoltre, attraverso l’apposito menu a tendina, l’utente potrà modificare il numero di componenti della PCA da calcolare. Ogni volta che questo valore viene aggiornato, sarà necessario premere nuovamente il pulsante “Calcola” per rielaborare l’analisi e aggiornare la visualizzazione.
@@ -62,7 +63,7 @@ Completata l’installazione delle dipendenze, il programma potrà essere avviat
 ```bash
 python Dashboard.py
 ```
-L’interfaccia grafica verrà quindi aperta e sarà possibile utilizzare il programma caricando un file CSV compatibile con la struttura richiesta. Questa modalità è particolarmente indicata per utenti che desiderano esaminare, modificare o sviluppare ulteriormente il codice sorgente dell’applicazione.
+L’interfaccia grafica verrà quindi aperta e sarà possibile utilizzare il programma caricando un file CSV compatibile con la struttura richiesta. Questa modalità è indicata per utenti che desiderano esaminare, modificare o sviluppare ulteriormente il codice sorgente dell’applicazione.
 
 # Utilizzo tramite file eseguibile
 
