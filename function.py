@@ -17,12 +17,12 @@ def threshold(
     b_min: int, b_max: int
 ) -> Image.Image:
     """
-    Threshold RGB con limite inferiore e superiore per ogni canale.
-    Pixel bianco se il pixel è dentro tutti e 3 gli intervalli, altrimenti nero.
+    RGB threshold with lower and upper limits for each channel.
+    White pixel if the pixel is within all 3 ranges, otherwise black.
 
-    Ritorna: PIL Image binaria mode 'L' (0/255).
+    Returns: Binary PIL Image mode ‘L’ (0/255).
     """
-    # Validazione range
+    # Range validation
     vals = [r_min, r_max, g_min, g_max, b_min, b_max]
     if any((v < 0 or v > 255) for v in vals):
         raise ValueError("Tutti i valori devono essere tra 0 e 255.")
@@ -47,25 +47,25 @@ def threshold(
 
 def estrazzione_features_geometriche(mask: Image.Image) -> np.ndarray:
     """
-    Estrae feature geometriche da una maschera binaria.
+    Extracts geometric features from a binary mask.
 
-    Feature ritornate:
+    Returned features:
     [height, width, area, aspect_ratio, extent, solidity, equivalent_diameter, hu1..hu7]
     """
     # PIL -> numpy grayscale uint8
     mask_np = np.array(mask.convert("L"), dtype=np.uint8)
 
-    # Binarizzazione sicura (0/255)
+    # Binarization  (0/255)
     _, mask_bin = cv2.threshold(mask_np, 127, 255, cv2.THRESH_BINARY)
 
-    # Area (pixel bianchi)
+    # Area (white pixels)
     area = float(np.count_nonzero(mask_bin))
 
-    # Se non c'è oggetto, ritorna zeri
+    # If there is no object, it returns zero
     if area == 0:
         return np.zeros(14, dtype=float)  # 7 base + 7 Hu
 
-    # Bounding box senza contorni
+    # Bounding box without outlines
     ys, xs = np.where(mask_bin > 0)
     ymin, ymax = ys.min(), ys.max()
     xmin, xmax = xs.min(), xs.max()
@@ -80,7 +80,7 @@ def estrazzione_features_geometriche(mask: Image.Image) -> np.ndarray:
     rect_area = float(width * height)
     extent = float(area / rect_area) if rect_area > 0 else 0.0
 
-    # Per solidity e Hu moments serve un contorno
+    # Solidity and Hu Moments need a side contours
     contours, _ = cv2.findContours(mask_bin, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contorno = max(contours, key=cv2.contourArea)
 
@@ -88,14 +88,14 @@ def estrazzione_features_geometriche(mask: Image.Image) -> np.ndarray:
     hull_area = float(cv2.contourArea(hull))
     solidity = float(area / hull_area) if hull_area > 0 else 0.0
 
-    # Diametro equivalente
+    # Equivalent diameter
     equivalent_diameter = float(np.sqrt(4.0 * area / np.pi))
 
     # Hu moments
     moments = cv2.moments(contorno)
     hu = cv2.HuMoments(moments).flatten().astype(float)
     hu = np.sign(hu) * np.log(np.abs(hu) + 1e-12)
-    # Feature finali
+    # Final features
     features_base = np.array(
         [height, width, area, aspect_ratio, extent, solidity, equivalent_diameter],
         dtype=float)
@@ -104,8 +104,8 @@ def estrazzione_features_geometriche(mask: Image.Image) -> np.ndarray:
 
 def estrazione_feature_texturali(img, img_binary, raggio=3, punti=4):
     """
-    questa funzione restituirà un vettore dove saranno presenti le feature texturali
-    per ogni canale dell'immagine.
+    This function will return a vector containing the textural features
+    for each channel of the image.
     :param img: Image
     :param img_binary: Mask of the image
     :param raggio: parameter of lbp
@@ -142,56 +142,55 @@ def estrazioni_feature_e_nomi(img, img_binary,
                              nomi_canali,
                              raggio=3, punti=4):
     """
-    Questa funzione calcola il vettore completo delle feature (geometriche + testurali)
-    e restituisce in parallelo i nomi corrispondenti a ciascuna feature, in modo da avere
-    una rappresentazione interpretabile e tracciabile delle colonne (utile per CSV/DataFrame).
+    This function calculates the complete vector of features
+    and returns the names corresponding to each feature in parallel, in order to have
+    an interpretable and traceable representation of the columns.
 
-    La parte testurale è composta da:
-    - Haralick (con media/varianza pixel aggiunte) per ciascun canale
-    - LBP per ciascun canale (con nomi generati dinamicamente in base alla lunghezza)
+    The textural component consists of:
+    - Haralick (with added pixel mean and variance) for each channel
+    - LBP for each channel (with names generated dynamically based on length)
 
-    :param img: Image (RGB). Immagine di input su cui estrarre le feature.
-    :param img_binary: Mask of the image. Maschera binaria che definisce la ROI.
-    :param nomi_features_geometriche: lista/array di stringhe contenente i nomi delle feature geometriche.
-    :param nomi_features_haralick_canali: lista/array di stringhe contenente i nomi delle feature haralick (già espansi per canale).
-    :param nomi_canali: lista di stringhe con i nomi dei canali (es. ["R","G","B"]).
-    :param raggio: parameter of lbp. Raggio usato per il calcolo delle LBP.
-    :param punti: parameter of lbp. Numero di punti usati per il calcolo delle LBP.
-    :return: (features, nomi)
-             - features: ndarray 1D con tutte le feature concatenate (geometriche + haralick + lbp)
-             - nomi: ndarray/lista con i nomi corrispondenti alle feature (stesso ordine e stessa lunghezza)
+       :param img: Image (RGB). Input image from which to extract features.
+    :param img_binary: Mask of the image. Binary mask defining the ROI.
+    :param geometric_feature_names: list/array of strings containing the names of geometric features.
+    :param haralick_feature_names_channels: list/array of strings containing the names of the Haralick features (already expanded by channel).
+    :param channel_names: list of strings with the names of the channels.
+    :param radius: parameter of lbp. Radius used for the calculation of LBP.
+    :param points: parameter of lbp. Number of points used for the calculation of LBP.
+    :return:
+        - features: 1D ndarray with all features concatenated (geometric + haralick + lbp)
+        - names: ndarray/list with names corresponding to features (same order and same length)
     """
-    # Estrazione delle feature testurali (separate in haralick e lbp)
+    # Extraction of textural features (divided into Haralick and LBP)
     haralick, lib = estrazione_feature_texturali(img, img_binary, raggio=raggio, punti=punti)
-    # Concatenazione delle feature testurali in un unico vettore
+    # Concatenation of textural features into a single vector
     feature_testurali = np.concatenate([haralick, lib])
-    # Concatenazione finale: feature geometriche + feature testurali
+    # Final concatenation: geometric features + textural features
     features = np.concatenate([estrazzione_features_geometriche(img_binary), feature_testurali])
-    # Costruzione dei nomi delle feature LBP:
-    # lib contiene le LBP di tutti e 3 i canali concatenate, quindi la lunghezza per canale è len(lib)/3
+    # Constructing LBP feature names:
+    # lib contains the concatenated LBPs from all 3 channels, so the length per channel is len(lib)/3
     nomi_lib = []
     len_lib = len(lib) / 3
-    # Per ogni canale, creo i nomi LBP_1_<canale>, LBP_2_<canale>, ...
+    # For each channel, I create the names LBP_1_<channel>, LBP_2_<channel>, ...
     for nome_canale in nomi_canali:
         for i in range(int(len_lib)):
             nomi_lib.append(f"LBP_{i+1}_{nome_canale}")
-    # Concatenazione finale dei nomi: geometriche + haralick (già preparate) + lbp (generate qui)
+    # Final concatenation of names: geometric + haralick (already prepared) + lbp (generated here)
     nomi = np.concatenate([nomi_features_geometriche, nomi_features_haralick_canali, nomi_lib])
     return features, nomi
 
 def directory_immagini_to_csv(directory_path: str, recursive: bool = True, csv_name: str = "paths_immagini.csv") -> pd.DataFrame:
     """
-    Crea un DataFrame con una sola colonna 'path' contenente i percorsi delle immagini
-    presenti in una directory (opzionalmente anche nelle sottodirectory) e lo salva come CSV
-    nella stessa directory.
+    Create a DataFrame with a single column ‘path’ containing the paths of the images
+    present in a directory and save it as CSV in the same directory.
 
     Args:
-        directory_path: percorso della directory da scandire
-        recursive: se True scandisce anche le sottocartelle
-        csv_name: nome del file csv da salvare nella directory
+        directory_path: path of the directory to scan
+        recursive: if True, also scans subfolders
+        csv_name: name of the CSV file to save in the directory
 
     Returns:
-        df: DataFrame con colonna 'path'
+        df: DataFrame with ‘path’ column
     """
     dir_path = Path(directory_path)
 
@@ -200,7 +199,7 @@ def directory_immagini_to_csv(directory_path: str, recursive: bool = True, csv_n
     if not dir_path.is_dir():
         raise NotADirectoryError(f"Non è una directory: {dir_path}")
 
-    # Estensioni immagini comuni (aggiungine se ti serve)
+    # Common image file extensions (add more if needed)
     exts = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 
     pattern = "**/*" if recursive else "*"
@@ -226,7 +225,8 @@ def compute_pca_on_df_vars(
         min_samples: int = 2,
 ):
     """
-    PCA su DataFrame, senza classi: ritorna variabili.
+    PCA on DataFrame, without classes: returns variables.
+
 
     Returns:
       ok (bool),
@@ -264,7 +264,7 @@ def compute_pca_on_df_vars(
         return (False, "Troppe righe con NaN: non ho abbastanza campioni validi per PCA.",
                 None, None, None, cols, valid_mask, None)
 
-    # numero componenti
+    # number of components
     ncomp = int(n_components) if use_pca else 2
     ncomp = max(2, ncomp)  # per scatter 2D
     ncomp = min(ncomp, Xv.shape[1])  # non più delle feature
@@ -290,7 +290,7 @@ def run_kmeans_vars(
     min_samples: int = 2,
 ):
     """
-    KMeans standalone: ritorna solo variabili.
+    KMeans standalone: returns only variables.
 
     Input:
       - X: array-like (n_samples, n_features) oppure DataFrame
@@ -306,7 +306,7 @@ def run_kmeans_vars(
     if X is None:
         return (False, "Input X is None.", None, None, None)
 
-    # converto a numpy
+    # convert to NumPy
     Xc = np.asarray(X)
 
     if Xc.ndim != 2:
