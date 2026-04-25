@@ -8,8 +8,828 @@ from sklearn.preprocessing import StandardScaler
 from pathlib import Path
 import pandas as pd
 from sklearn.cluster import KMeans
+######################### CSV MANAGER #######################################
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+from dataclasses import dataclass
 
 
+PATH_COLUMN = "path"
+
+THRESHOLD_COLUMNS = [
+    "thr_rmin",
+    "thr_rmax",
+    "thr_gmin",
+    "thr_gmax",
+    "thr_bmin",
+    "thr_bmax",
+]
+
+LBP_COLUMNS = [
+    "lbp_raggio",
+    "lbp_punti",
+]
+
+
+def read_input_csv(csv_path: str | Path) -> pd.DataFrame:
+    """
+    Read the input CSV file and ensure that it contains a 'path' column.
+
+    If the CSV does not contain a 'path' column, the first column is renamed
+    to 'path'. Leading and trailing spaces in image paths are removed.
+    """
+    csv_path = Path(csv_path)
+
+    df = pd.read_csv(csv_path, encoding="utf-8-sig")
+
+    if df.empty:
+        raise ValueError("The CSV file is empty.")
+
+    if PATH_COLUMN not in df.columns:
+        first_column = df.columns[0]
+        df = df.rename(columns={first_column: PATH_COLUMN})
+
+    df[PATH_COLUMN] = df[PATH_COLUMN].astype(str).str.strip()
+
+    return df
+
+
+def extract_paths(df: pd.DataFrame) -> list[str]:
+    """
+    Extract valid image paths from the 'path' column.
+    """
+    if PATH_COLUMN not in df.columns:
+        return []
+
+    return (
+        df[PATH_COLUMN]
+        .astype(str)
+        .str.strip()
+        .replace("", pd.NA)
+        .dropna()
+        .tolist()
+    )
+
+
+def get_feature_columns(df: pd.DataFrame) -> list[str]:
+    """
+    Return all columns that are not the image path column.
+    """
+    return [column for column in df.columns if column != PATH_COLUMN]
+
+
+def get_real_feature_columns(df: pd.DataFrame) -> list[str]:
+    """
+    Return only feature columns, excluding path, threshold columns and LBP columns.
+    """
+    excluded_columns = set([PATH_COLUMN] + THRESHOLD_COLUMNS + LBP_COLUMNS)
+
+    return [column for column in df.columns if column not in excluded_columns]
+
+
+def find_row_by_path(df: pd.DataFrame, image_path: str) -> pd.Series | None:
+    """
+    Return the row corresponding to an image path.
+
+    If no row is found, return None.
+    """
+    if PATH_COLUMN not in df.columns:
+        return None
+
+    matches = df[df[PATH_COLUMN] == str(image_path).strip()]
+
+    if matches.empty:
+        return None
+
+    return matches.iloc[0]
+
+
+def build_feature_row(
+    image_path: str,
+    feature_names: list[str],
+    feature_values: list[Any],
+    threshold_values: dict[str, int],
+    lbp_radius: int,
+    lbp_points: int,
+) -> dict[str, Any]:
+    """
+    Build a dictionary containing path, features, threshold values and LBP parameters.
+
+    This dictionary can later be merged into the dataset CSV.
+    """
+    n = min(len(feature_names), len(feature_values))
+
+    row = {
+        feature_names[index]: feature_values[index]
+        for index in range(n)
+    }
+
+    row[PATH_COLUMN] = image_path
+    row.update(threshold_values)
+    row["lbp_raggio"] = lbp_radius
+    row["lbp_punti"] = lbp_points
+
+    return row
+
+
+def update_dataset_with_feature_rows(
+    df: pd.DataFrame,
+    feature_rows: list[dict[str, Any]],
+) -> pd.DataFrame:
+    """
+    Merge extracted feature rows into the original dataset.
+
+    Existing columns are overwritten with the new values when a matching
+    image path is found.
+    """
+    if not feature_rows:
+        return df.copy()
+
+    feature_df = pd.DataFrame(feature_rows)
+
+    if PATH_COLUMN not in feature_df.columns:
+        raise ValueError("Feature rows must contain a 'path' field.")
+
+    updated_df = df.merge(
+        feature_df,
+        on=PATH_COLUMN,
+        how="left",
+        suffixes=("", "_new"),
+    )
+
+    for column in feature_df.columns:
+        if column == PATH_COLUMN:
+            continue
+
+        new_column = f"{column}_new"
+
+        if new_column in updated_df.columns:
+            updated_df[column] = updated_df[new_column]
+            updated_df = updated_df.drop(columns=[new_column])
+
+    return updated_df
+
+
+def save_csv(df: pd.DataFrame, csv_path: str | Path) -> None:
+    """
+    Save the DataFrame to CSV.
+    """
+    csv_path = Path(csv_path)
+    df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+
+
+def extract_threshold_values(row: pd.Series) -> dict[str, int] | None:
+    """
+    Extract RGB threshold values from a CSV row.
+
+    Return None if at least one threshold column is missing or empty.
+    """
+    if not all(column in row.index for column in THRESHOLD_COLUMNS):
+        return None
+
+    if row[THRESHOLD_COLUMNS].isna().any():
+        return None
+
+    return {
+        "thr_rmin": int(row["thr_rmin"]),
+        "thr_rmax": int(row["thr_rmax"]),
+        "thr_gmin": int(row["thr_gmin"]),
+        "thr_gmax": int(row["thr_gmax"]),
+        "thr_bmin": int(row["thr_bmin"]),
+        "thr_bmax": int(row["thr_bmax"]),
+    }
+
+
+def extract_lbp_values(row: pd.Series) -> dict[str, int] | None:
+    """
+    Extract LBP parameters from a CSV row.
+
+    Return None if LBP columns are missing or empty.
+    """
+    if not all(column in row.index for column in LBP_COLUMNS):
+        return None
+
+    if row[LBP_COLUMNS].isna().any():
+        return None
+
+    return {
+        "lbp_raggio": int(row["lbp_raggio"]),
+        "lbp_punti": int(row["lbp_punti"]),
+    }
+
+
+def extract_saved_features_from_row(
+    row: pd.Series,
+    feature_columns: list[str],
+) -> tuple[list[str], list[Any]]:
+    """
+    Extract already saved feature names and values from a CSV row.
+
+    Missing values and empty strings are ignored.
+    """
+    names = []
+    values = []
+
+    for column in feature_columns:
+        if column not in row.index:
+            continue
+
+        value = row[column]
+
+        if pd.isna(value):
+            continue
+
+        if isinstance(value, str) and value.strip() == "":
+            continue
+
+        names.append(column)
+        values.append(value)
+
+    return names, values
+#######################image_manager.py#############################
+
+def load_rgb_image(image_path: str | Path) -> Image.Image:
+    """
+    Load an image from disk and convert it to RGB.
+
+    Parameters
+    ----------
+    image_path:
+        Path of the image to load.
+
+    Returns
+    -------
+    Image.Image
+        RGB image.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the image file does not exist.
+    OSError
+        If the image cannot be opened by PIL.
+    """
+    image_path = Path(image_path)
+
+    if not image_path.exists():
+        raise FileNotFoundError(f"Image file not found: {image_path}")
+
+    return Image.open(image_path).convert("RGB")
+
+
+def resize_image_for_preview(
+    image: Image.Image,
+    max_width: int = 520,
+    max_height: int = 520,
+    resample: int = Image.Resampling.NEAREST,
+) -> Image.Image:
+    """
+    Resize an image while preserving its aspect ratio.
+
+    This function is used only to create a GUI preview. It does not modify
+    the original image used for feature extraction.
+
+    Parameters
+    ----------
+    image:
+        Input image.
+    max_width:
+        Maximum preview width.
+    max_height:
+        Maximum preview height.
+    resample:
+        PIL resampling method.
+
+    Returns
+    -------
+    Image.Image
+        Resized image.
+    """
+    original_width, original_height = image.size
+
+    scale = min(
+        max_width / original_width,
+        max_height / original_height,
+    )
+
+    new_width = max(1, int(original_width * scale))
+    new_height = max(1, int(original_height * scale))
+
+    return image.resize((new_width, new_height), resample)
+
+
+def validate_threshold_values(
+    rmin: int,
+    rmax: int,
+    gmin: int,
+    gmax: int,
+    bmin: int,
+    bmax: int,
+) -> None:
+    """
+    Validate RGB threshold values.
+
+    Values must be between 0 and 255 and each minimum must be lower than
+    or equal to the corresponding maximum.
+
+    Raises
+    ------
+    ValueError
+        If at least one threshold value is invalid.
+    """
+    values = {
+        "rmin": rmin,
+        "rmax": rmax,
+        "gmin": gmin,
+        "gmax": gmax,
+        "bmin": bmin,
+        "bmax": bmax,
+    }
+
+    for name, value in values.items():
+        if value < 0 or value > 255:
+            raise ValueError(f"{name} must be between 0 and 255.")
+
+    if rmin > rmax:
+        raise ValueError("rmin must be lower than or equal to rmax.")
+
+    if gmin > gmax:
+        raise ValueError("gmin must be lower than or equal to gmax.")
+
+    if bmin > bmax:
+        raise ValueError("bmin must be lower than or equal to bmax.")
+
+
+def apply_rgb_threshold(
+    image: Image.Image,
+    threshold_function: Any,
+    rmin: int,
+    rmax: int,
+    gmin: int,
+    gmax: int,
+    bmin: int,
+    bmax: int,
+) -> Image.Image:
+    """
+    Validate threshold values and apply the RGB threshold function.
+
+    Parameters
+    ----------
+    image:
+        Input RGB image.
+    threshold_function:
+        Function used to compute the binary mask. In your project this is
+        the existing `threshold` function.
+    rmin, rmax, gmin, gmax, bmin, bmax:
+        RGB threshold limits.
+
+    Returns
+    -------
+    Image.Image
+        Binary mask image.
+    """
+    validate_threshold_values(
+        rmin=rmin,
+        rmax=rmax,
+        gmin=gmin,
+        gmax=gmax,
+        bmin=bmin,
+        bmax=bmax,
+    )
+
+    return threshold_function(
+        image,
+        rmin,
+        rmax,
+        gmin,
+        gmax,
+        bmin,
+        bmax,
+    )
+
+######################feature_service.py################à
+@dataclass
+class FeatureExtractionResult:
+    """
+    Container for the output of feature extraction.
+
+    Attributes
+    ----------
+    values:
+        Extracted feature values.
+    names:
+        Feature names.
+    warning:
+        Optional warning message, for example when the number of names and
+        values does not match.
+    """
+    values: list[Any]
+    names: list[str]
+    warning: str | None = None
+
+
+def extract_image_features(
+    image: Image.Image,
+    binary_image: Image.Image,
+    extraction_function,
+    geometric_feature_names: list[str],
+    haralick_channel_feature_names: list[str],
+    channel_names: list[str],
+    lbp_radius: int,
+    lbp_points: int,
+) -> FeatureExtractionResult:
+    """
+    Extract geometric and texture features from an image and its binary mask.
+
+    This function wraps the existing feature extraction function used by the
+    project and returns a structured result.
+
+    Parameters
+    ----------
+    image:
+        Original RGB image.
+    binary_image:
+        Binary mask obtained from thresholding.
+    extraction_function:
+        Existing feature extraction function. In this project it is
+        `estrazioni_feature_e_nomi`.
+    geometric_feature_names:
+        Names of geometric features.
+    haralick_channel_feature_names:
+        Names of Haralick features for each RGB channel.
+    channel_names:
+        RGB channel names.
+    lbp_radius:
+        Radius used for Local Binary Patterns.
+    lbp_points:
+        Number of points used for Local Binary Patterns.
+
+    Returns
+    -------
+    FeatureExtractionResult
+        Extracted feature names, values and optional warning.
+    """
+    feature_values, feature_names = extraction_function(
+        image,
+        binary_image,
+        geometric_feature_names,
+        haralick_channel_feature_names,
+        channel_names,
+        raggio=lbp_radius,
+        punti=lbp_points,
+    )
+
+    feature_values = list(feature_values)
+    feature_names = list(feature_names)
+
+    warning = None
+
+    if len(feature_values) != len(feature_names):
+        warning = (
+            f"Number of feature values ({len(feature_values)}) does not match "
+            f"number of feature names ({len(feature_names)})."
+        )
+
+        common_length = min(len(feature_values), len(feature_names))
+        feature_values = feature_values[:common_length]
+        feature_names = feature_names[:common_length]
+
+    return FeatureExtractionResult(
+        values=feature_values,
+        names=feature_names,
+        warning=warning,
+    )
+
+
+def format_features_for_display(
+    feature_names: list[str],
+    feature_values: list[Any],
+) -> str:
+    """
+    Format feature names and values for display in the Tkinter text box.
+
+    Parameters
+    ----------
+    feature_names:
+        Names of the extracted features.
+    feature_values:
+        Values of the extracted features.
+
+    Returns
+    -------
+    str
+        Formatted text.
+    """
+    lines = []
+
+    for name, value in zip(feature_names, feature_values):
+        lines.append(f"\t{name}=\t{value}")
+
+    return "\n".join(lines)
+
+
+def append_warning_to_display_text(
+    text: str,
+    warning: str | None,
+) -> str:
+    """
+    Append a warning message to feature display text, if a warning exists.
+    """
+    if warning is None:
+        return text
+
+    return f"{text}\n\n[WARNING] {warning}"
+
+###################################PCA_servie######################à
+from dataclasses import dataclass
+
+import pandas as pd
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+
+EXCLUDED_PCA_COLUMNS = {
+    "path",
+    "thr_rmin",
+    "thr_rmax",
+    "thr_gmin",
+    "thr_gmax",
+    "thr_bmin",
+    "thr_bmax",
+    "lbp_raggio",
+    "lbp_punti",
+}
+
+
+@dataclass
+class PCAResult:
+    """
+    Container for PCA output.
+
+    Attributes
+    ----------
+    model:
+        Fitted PCA model.
+    scaler:
+        Fitted StandardScaler model.
+    scores:
+        DataFrame containing PCA scores with columns PC1, PC2, ...
+    feature_columns:
+        Numeric feature columns actually used for PCA.
+    valid_mask:
+        Boolean mask identifying rows used for PCA.
+    explained_variance_ratio:
+        Explained variance ratio for each principal component.
+    """
+    model: PCA
+    scaler: StandardScaler
+    scores: pd.DataFrame
+    feature_columns: list[str]
+    valid_mask: pd.Series
+    explained_variance_ratio: object
+
+
+def select_numeric_feature_columns(
+    df: pd.DataFrame,
+    excluded_columns: set[str] | None = None,
+) -> list[str]:
+    """
+    Select numeric feature columns suitable for PCA.
+
+    Columns listed in excluded_columns are ignored. Columns that cannot be
+    converted to numeric values or that contain only NaN values are removed.
+
+    Parameters
+    ----------
+    df:
+        Input DataFrame.
+    excluded_columns:
+        Columns to exclude from PCA.
+
+    Returns
+    -------
+    list[str]
+        Valid numeric feature columns.
+    """
+    if excluded_columns is None:
+        excluded_columns = EXCLUDED_PCA_COLUMNS
+
+    candidate_columns = [
+        column for column in df.columns
+        if column not in excluded_columns
+    ]
+
+    if not candidate_columns:
+        return []
+
+    numeric_df = df[candidate_columns].apply(pd.to_numeric, errors="coerce")
+
+    feature_columns = [
+        column for column in numeric_df.columns
+        if not numeric_df[column].isna().all()
+    ]
+
+    return feature_columns
+
+
+def compute_pca_from_dataframe(
+    df: pd.DataFrame,
+    n_components: int = 2,
+    use_pca: bool = True,
+    excluded_columns: set[str] | None = None,
+) -> PCAResult:
+    """
+    Compute PCA from the valid numeric feature columns of a DataFrame.
+
+    Parameters
+    ----------
+    df:
+        Input DataFrame containing feature columns.
+    n_components:
+        Number of PCA components requested.
+    use_pca:
+        If False, force the number of components to 2.
+    excluded_columns:
+        Columns that must not be used for PCA.
+
+    Returns
+    -------
+    PCAResult
+        Structured PCA result.
+
+    Raises
+    ------
+    ValueError
+        If no valid numeric feature columns are available or if there are not
+        enough valid rows.
+    """
+    if df is None or df.empty:
+        raise ValueError("The input DataFrame is empty.")
+
+    if excluded_columns is None:
+        excluded_columns = EXCLUDED_PCA_COLUMNS
+
+    feature_columns = select_numeric_feature_columns(
+        df,
+        excluded_columns=excluded_columns,
+    )
+
+    if not feature_columns:
+        raise ValueError("No valid numeric feature columns available for PCA.")
+
+    numeric_df = df[feature_columns].apply(pd.to_numeric, errors="coerce")
+
+    valid_mask = ~numeric_df.isna().any(axis=1)
+    valid_data = numeric_df.loc[valid_mask].values
+
+    if valid_data.shape[0] < 2:
+        raise ValueError("At least two valid rows are required for PCA.")
+
+    max_components = min(valid_data.shape[0], valid_data.shape[1])
+
+    if max_components < 2:
+        raise ValueError("At least two valid numeric features or rows are required for PCA.")
+
+    if use_pca:
+        final_n_components = int(n_components)
+    else:
+        final_n_components = 2
+
+    final_n_components = max(2, min(final_n_components, max_components))
+
+    scaler = StandardScaler()
+    scaled_data = scaler.fit_transform(valid_data)
+
+    model = PCA(n_components=final_n_components)
+    scores_array = model.fit_transform(scaled_data)
+
+    scores = pd.DataFrame(
+        scores_array,
+        columns=[
+            f"PC{index}"
+            for index in range(1, final_n_components + 1)
+        ],
+    )
+
+    return PCAResult(
+        model=model,
+        scaler=scaler,
+        scores=scores,
+        feature_columns=feature_columns,
+        valid_mask=valid_mask,
+        explained_variance_ratio=model.explained_variance_ratio_,
+    )
+###########################k-means#############################
+@dataclass
+class KMeansResult:
+    """
+    Container for K-Means clustering output.
+
+    Attributes
+    ----------
+    labels:
+        Cluster label assigned to each sample.
+    model:
+        Fitted KMeans model.
+    centroids:
+        Cluster centroids.
+    inertia:
+        Sum of squared distances of samples to their closest cluster center.
+    """
+    labels: np.ndarray
+    model: KMeans
+    centroids: np.ndarray
+    inertia: float
+
+
+def validate_clustering_input(data: np.ndarray, n_clusters: int) -> None:
+    """
+    Validate input data and number of clusters for K-Means.
+
+    Parameters
+    ----------
+    data:
+        Input numeric matrix with shape (n_samples, n_features).
+    n_clusters:
+        Number of clusters requested.
+
+    Raises
+    ------
+    ValueError
+        If the input data or number of clusters is invalid.
+    """
+    if data is None:
+        raise ValueError("Input data cannot be None.")
+
+    data = np.asarray(data)
+
+    if data.ndim != 2:
+        raise ValueError("Input data must be a 2D matrix.")
+
+    n_samples = data.shape[0]
+
+    if n_samples < 2:
+        raise ValueError("At least two samples are required for clustering.")
+
+    if n_clusters < 2:
+        raise ValueError("The number of clusters must be at least 2.")
+
+    if n_clusters > n_samples:
+        raise ValueError(
+            "The number of clusters cannot be greater than the number of samples."
+        )
+
+    if not np.isfinite(data).all():
+        raise ValueError("Input data contains NaN or infinite values.")
+
+
+def run_kmeans(
+    data: np.ndarray,
+    n_clusters: int,
+    n_init: int = 10,
+    random_state: int = 0,
+) -> KMeansResult:
+    """
+    Run K-Means clustering on a numeric matrix.
+
+    Parameters
+    ----------
+    data:
+        Input numeric matrix with shape (n_samples, n_features).
+    n_clusters:
+        Number of clusters.
+    n_init:
+        Number of K-Means initializations.
+    random_state:
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    KMeansResult
+        Structured clustering result.
+    """
+    data = np.asarray(data)
+
+    validate_clustering_input(data, n_clusters)
+
+    model = KMeans(
+        n_clusters=n_clusters,
+        n_init=n_init,
+        random_state=random_state,
+    )
+
+    labels = model.fit_predict(data)
+
+    return KMeansResult(
+        labels=labels,
+        model=model,
+        centroids=model.cluster_centers_,
+        inertia=float(model.inertia_),
+    )
+
+##############################################################
 def threshold(
     img: Image.Image,
     r_min: int, r_max: int,
@@ -215,72 +1035,7 @@ def directory_immagini_to_csv(directory_path: str, recursive: bool = True, csv_n
     df.to_csv(out_csv, index=False)
 
     return df
-def compute_pca_on_df_vars(
-        df: pd.DataFrame,
-        *,
-        use_pca: bool = True,
-        n_components: int = 2,
-        exclude: set[str] | None = None,
-        require_complete_rows: bool = True,
-        min_samples: int = 2,
-):
-    """
-    PCA on DataFrame, without classes: returns variables.
 
-
-    Returns:
-      ok (bool),
-      msg (str),
-      pca (PCA|None),
-      scaler (StandardScaler|None),
-      scores_df (pd.DataFrame|None),
-      feature_cols (list[str]),
-      valid_mask (pd.Series|None),
-      explained_variance_ratio (np.ndarray|None)
-    """
-    if df is None or len(df) == 0:
-        return (False, "DataFrame vuoto o None.", None, None, None, [], None, None)
-
-    if exclude is None:
-        exclude = {
-            "path",
-            "lbp_raggio", "lbp_punti",
-            "thr_rmin", "thr_rmax", "thr_gmin", "thr_gmax", "thr_bmin", "thr_bmax",
-        }
-
-    cols = [c for c in df.columns if c not in exclude]
-    if not cols:
-        return (False, "Non trovo feature nel DataFrame (solo path/parametri?).", None, None, None, [], None, None)
-
-    X = df[cols].apply(pd.to_numeric, errors="coerce")
-
-    if require_complete_rows:
-        valid_mask = ~X.isna().any(axis=1)
-    else:
-        valid_mask = pd.Series([True] * len(X), index=X.index)
-
-    Xv = X.loc[valid_mask].values
-    if Xv.shape[0] < min_samples:
-        return (False, "Troppe righe con NaN: non ho abbastanza campioni validi per PCA.",
-                None, None, None, cols, valid_mask, None)
-
-    # number of components
-    ncomp = int(n_components) if use_pca else 2
-    ncomp = max(2, ncomp)  # per scatter 2D
-    ncomp = min(ncomp, Xv.shape[1])  # non più delle feature
-    if ncomp < 2:
-        return (False, "Troppe poche feature per fare PCA 2D.", None, None, None, cols, valid_mask, None)
-
-    scaler = StandardScaler()
-    Xs = scaler.fit_transform(Xv)
-
-    pca = PCA(n_components=ncomp)
-    scores = pca.fit_transform(Xs)
-
-    pc_cols = [f"PC{k}" for k in range(1, ncomp + 1)]
-    scores_df = pd.DataFrame(scores, columns=pc_cols, index=X.loc[valid_mask].index)
-
-    return (True, "OK", pca, scaler, scores_df, cols, valid_mask, pca.explained_variance_ratio_)
 def run_kmeans_vars(
     X,
     *,

@@ -2,7 +2,12 @@ import csv
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
-from function import threshold, estrazioni_feature_e_nomi, compute_pca_on_df_vars, run_kmeans_vars
+from function import (threshold, estrazioni_feature_e_nomi, run_kmeans_vars, read_input_csv,
+                      extract_paths, get_real_feature_columns, get_feature_columns, read_input_csv, load_rgb_image,
+                      apply_rgb_threshold, resize_image_for_preview, update_dataset_with_feature_rows, save_csv
+                      , build_feature_row,    extract_image_features,
+    format_features_for_display,
+    append_warning_to_display_text,compute_pca_from_dataframe, run_kmeans)
 import numpy as np
 import pandas as pd
 import os
@@ -43,10 +48,9 @@ class App:
         # Parameters LBP (Local Binary Patterns)
         self.raggio = tk.IntVar(value=3)  # LBP radius (in pixels): distance of points from the central pixel
         self.punti = tk.IntVar(value=4)  # number of LBP points/samples on the circle
-        self._ui()  # builds and configures the entire graphical interface
+        self._build_ui()  # builds and configures the entire graphical interface
         self._auto_bind_threshold()  # connect the tk.IntVar objects for the thresholds to the callbacks
-        self.nomi_features_geometriche=["height", "equivalent_diameterwidth", "area", "aspect_ratio", "extent", "solidity",
-                                     "",
+        self.nomi_features_geometriche=["height", "equivalent_diameter","width", "area", "aspect_ratio", "extent", "solidity",
                                      "hu1", "hu2", "hu3", "hu4", "hu5", "hu6", "hu7"] # names of geometric features
         self.nomi_feature_haralick = [ # names of textural features
             "mean_color",
@@ -71,122 +75,166 @@ class App:
             nomi_features_haralick_canali = np.concatenate(
                 [nomi_features_haralick_canali, [f"{n}_{nome}" for n in self.nomi_feature_haralick]])
         self.nomi_features_haralick_canali=nomi_features_haralick_canali
+    def _build_top_bar(self):
+        top_bar = ttk.Frame(self.root, padding=8)
+        top_bar.pack(fill="x")
 
+        top_bar.grid_columnconfigure(0, weight=0)
+        top_bar.grid_columnconfigure(1, weight=1)
+        top_bar.grid_columnconfigure(2, weight=0)
 
-    def _ui(self):
-        """ It builds the main UI (toolbar, threshold/LBP controls, image preview, feature text box).
-        """
-        #  Main controls + navigation + status
-        # --- TOP BAR: left | center | right (fixed)
-        top = ttk.Frame(self.root, padding=8)
-        top.pack(fill="x")
-
-        # 3 columns: Column 1 (in the center) fills the remaining space
-        top.grid_columnconfigure(0, weight=0)
-        top.grid_columnconfigure(1, weight=1)
-        top.grid_columnconfigure(2, weight=0)
-
-        left_bar = ttk.Frame(top)
+        left_bar = ttk.Frame(top_bar)
         left_bar.grid(row=0, column=0, sticky="w")
 
-        center_bar = ttk.Frame(top)
-        center_bar.grid(row=0, column=1)  # no sticky: remains centered in the cell
+        center_bar = ttk.Frame(top_bar)
+        center_bar.grid(row=0, column=1)
 
-        right_bar = ttk.Frame(top)
+        right_bar = ttk.Frame(top_bar)
         right_bar.grid(row=0, column=2, sticky="e")
 
-        # --- Left: CSV upload only
-        ttk.Button(left_bar, text="Carica CSV", command=self.load_csv).pack(side="left", padx=4, pady=(0, 4))
+        ttk.Button(left_bar, text="Load CSV", command=self.load_csv).pack(
+            side="left", padx=4, pady=(0, 4)
+        )
+        ttk.Button(center_bar, text="Extract features", command=self.extract_features).pack(
+            side="left", padx=4, pady=(0, 4)
+        )
+        ttk.Button(center_bar, text="Save features", command=self.save_features).pack(
+            side="left", padx=4, pady=(0, 4)
+        )
+        ttk.Button(center_bar, text="Save dataset features", command=self.save_features_all).pack(
+            side="left", padx=4, pady=(0, 4)
+        )
+        ttk.Button(right_bar, text="Show PCA", command=self.open_subwindow).pack(
+            side="left", padx=4, pady=(0, 4)
+        )
 
-        # --- Center: 3 buttons (centered)
-        ttk.Button(center_bar, text="Estrai feature", command=self.extract_features).pack(side="left", padx=4,pady=(0, 4)) # extracts features from the current image
-        ttk.Button(center_bar, text="Salva feature", command=self.save_features).pack(side="left", padx=4, pady=(0, 4))  # Save the features of the current image to a local file
-        ttk.Button(center_bar, text="Salva feature dataset", command=self.save_features_all).pack(side="left", padx=4,pady=(0, 4))  # Save the features of all images to a CSV file
+    def _build_navigation_bar(self):
+        navigation_bar = ttk.Frame(self.root, padding=(8, 0, 8, 8))
+        navigation_bar.pack(fill="x")
 
-        # Right: Subwindow
-        ttk.Button(right_bar, text="visualizza PCA", command=self.open_subwindow).pack(side="left", padx=4, pady=(0, 4))
+        navigation_bar.grid_columnconfigure(0, weight=0)
+        navigation_bar.grid_columnconfigure(1, weight=1)
+        navigation_bar.grid_columnconfigure(2, weight=0)
 
-        # Bottom bar: Prev / Next on the left, Status centered
-        nav = ttk.Frame(self.root, padding=(8, 0, 8, 8))
-        nav.pack(fill="x")
+        button_area = ttk.Frame(navigation_bar)
+        button_area.grid(row=0, column=0, sticky="w")
 
-        nav.grid_columnconfigure(0, weight=0)
-        nav.grid_columnconfigure(1, weight=1)
-        nav.grid_columnconfigure(2, weight=0)
-        # Frame containing the Prev/Next buttons
-        nav_left = ttk.Frame(nav)
-        nav_left.grid(row=0, column=0, sticky="w")
-        # The “main” frame where you enter your status
-        nav_center = ttk.Frame(nav)
-        nav_center.grid(row=0, column=1)  # centered
+        status_area = ttk.Frame(navigation_bar)
+        status_area.grid(row=0, column=1)
 
-        # Pulsanti di navigazione
-        ttk.Button(nav_left, text="<< Prev", command=self.prev).pack(side="left", padx=4)
-        ttk.Button(nav_left, text="Next >>", command=self.next).pack(side="left", padx=4)
+        ttk.Button(button_area, text="<< Previous", command=self.prev).pack(
+            side="left", padx=4
+        )
+        ttk.Button(button_area, text="Next >>", command=self.next).pack(
+            side="left", padx=4
+        )
 
-        self.status = ttk.Label(nav_center, text="Nessun CSV.")
-        self.status.pack()
+        self.status_label = ttk.Label(status_area, text="No CSV loaded.")
+        self.status_label.pack()
 
-        #top.grid_columnconfigure(6, weight=1)
+    def _build_settings_panel(self):
+        settings_panel = ttk.LabelFrame(
+            self.root,
+            text="RGB threshold and LBP parameters",
+            padding=8,
+        )
+        settings_panel.pack(fill="x", padx=8, pady=6)
 
-        #Control panel for threshold variables and linear binary patterns
-        dash = ttk.LabelFrame(self.root, text="Threshold RGB (min/max) + LBP (raggio/punti)", padding=8)
-        dash.pack(fill="x", padx=8, pady=6)
+        self._add_threshold_row(settings_panel, 0, "R", self.rmin, self.rmax)
+        self._add_threshold_row(settings_panel, 1, "G", self.gmin, self.gmax)
+        self._add_threshold_row(settings_panel, 2, "B", self.bmin, self.bmax)
 
-        # Helper for creating a row of min/max controls
-        def row(r, name, vmin, vmax):
-            ttk.Label(dash, text=name, width=2).grid(row=r, column=0, sticky="w", padx=(0, 8))
-            ttk.Label(dash, text="min").grid(row=r, column=1, sticky="e")
-            ttk.Entry(dash, textvariable=vmin, width=6).grid(row=r, column=2, padx=(4, 12))
-            ttk.Label(dash, text="max").grid(row=r, column=3, sticky="e")
-            ttk.Entry(dash, textvariable=vmax, width=6).grid(row=r, column=4, padx=(4, 18))
+        ttk.Label(settings_panel, text="Radius").grid(row=0, column=5, sticky="e")
+        ttk.Spinbox(
+            settings_panel,
+            from_=1,
+            to=20,
+            textvariable=self.raggio,
+            width=6,
+        ).grid(row=0, column=6, padx=(6, 18))
 
-        # RGB thresholds: values read from self.rmin, self.rmax, etc.
-        row(0, "R", self.rmin, self.rmax)
-        row(1, "G", self.gmin, self.gmax)
-        row(2, "B", self.bmin, self.bmax)
+        ttk.Label(settings_panel, text="Points").grid(row=1, column=5, sticky="e")
+        ttk.Spinbox(
+            settings_panel,
+            from_=4,
+            to=64,
+            textvariable=self.punti,
+            width=6,
+        ).grid(row=1, column=6, padx=(6, 18))
 
-        # LBP parameters: Spin boxes linked to self.radius/self.points
-        ttk.Label(dash, text="Raggio").grid(row=0, column=5, sticky="e")
-        ttk.Spinbox(dash, from_=1, to=20, textvariable=self.raggio, width=6).grid(row=0, column=6, padx=(6, 18))
-        ttk.Label(dash, text="Punti").grid(row=1, column=5, sticky="e")
-        ttk.Spinbox(dash, from_=4, to=64, textvariable=self.punti, width=6).grid(row=1, column=6, padx=(6, 18))
-        # Main window display area: image preview on the left, feature output on the right
-        body = ttk.Frame(self.root, padding=8)
-        body.pack(fill="both", expand=True)
+    def _add_threshold_row(self, parent, row_index, channel_name, min_var, max_var):
+        ttk.Label(parent, text=channel_name, width=2).grid(
+            row=row_index, column=0, sticky="w", padx=(0, 8)
+        )
+        ttk.Label(parent, text="min").grid(row=row_index, column=1, sticky="e")
+        ttk.Entry(parent, textvariable=min_var, width=6).grid(
+            row=row_index, column=2, padx=(4, 12)
+        )
+        ttk.Label(parent, text="max").grid(row=row_index, column=3, sticky="e")
+        ttk.Entry(parent, textvariable=max_var, width=6).grid(
+            row=row_index, column=4, padx=(4, 18)
+        )
 
-        # Left section: two image panels side by side
-        left = ttk.Frame(body)
-        left.pack(side="left", fill="both", expand=True, padx=(0, 6))
+    def _build_image_preview_panel(self, parent):
+        image_area = ttk.Frame(parent)
+        image_area.pack(side="left", fill="both", expand=True, padx=(0, 6))
 
-        # Original Preview
-        f1 = ttk.LabelFrame(left, text="Originale")
-        f1.pack(side="left", fill="both", expand=True, padx=(0, 6))
-        self.p1 = ttk.Label(f1)  # label che ospita PhotoImage
-        self.p1.pack(fill="both", expand=True, padx=8, pady=8)
+        original_frame = ttk.LabelFrame(image_area, text="Original")
+        original_frame.pack(side="left", fill="both", expand=True, padx=(0, 6))
 
-        # Preview threshold
-        f2 = ttk.LabelFrame(left, text="Threshold (binaria)")
-        f2.pack(side="left", fill="both", expand=True, padx=(6, 0))
-        self.p2 = ttk.Label(f2)
-        self.p2.pack(fill="both", expand=True, padx=8, pady=8)
+        self.original_image_label = ttk.Label(original_frame)
+        self.original_image_label.pack(fill="both", expand=True, padx=8, pady=8)
 
-        # Right section: text box with features (names + values) and a scroll bar
-        right = ttk.LabelFrame(body, text="Feature (nomi + valori)", padding=8, width=420)
-        right.pack(side="right", fill="both")
+        mask_frame = ttk.LabelFrame(image_area, text="Binary mask")
+        mask_frame.pack(side="left", fill="both", expand=True, padx=(6, 0))
 
-        self.txt = tk.Text(right, wrap="none", width=55)  # wrap none: keep tabs/columns aligned
-        xscroll = ttk.Scrollbar(right, orient="horizontal", command=self.txt.xview)
-        yscroll = ttk.Scrollbar(right, orient="vertical", command=self.txt.yview)
-        self.txt.configure(xscrollcommand=xscroll.set, yscrollcommand=yscroll.set)
+        self.mask_image_label = ttk.Label(mask_frame)
+        self.mask_image_label.pack(fill="both", expand=True, padx=8, pady=8)
 
-        # Pack scroll + text
-        yscroll.pack(side="right", fill="y")
-        xscroll.pack(side="bottom", fill="x")
-        self.txt.pack(side="left", fill="both", expand=True)
+    def _build_feature_output_panel(self, parent):
+        feature_area = ttk.LabelFrame(
+            parent,
+            text="Features",
+            padding=8,
+            width=420,
+        )
+        feature_area.pack(side="right", fill="both")
 
-        # Monospace font for better alignment of “name = value”
-        self.txt.configure(font=("Consolas", 10))
+        self.feature_text = tk.Text(feature_area, wrap="none", width=55)
+
+        x_scrollbar = ttk.Scrollbar(
+            feature_area,
+            orient="horizontal",
+            command=self.feature_text.xview,
+        )
+        y_scrollbar = ttk.Scrollbar(
+            feature_area,
+            orient="vertical",
+            command=self.feature_text.yview,
+        )
+
+        self.feature_text.configure(
+            xscrollcommand=x_scrollbar.set,
+            yscrollcommand=y_scrollbar.set,
+            font=("Consolas", 10),
+        )
+
+        y_scrollbar.pack(side="right", fill="y")
+        x_scrollbar.pack(side="bottom", fill="x")
+        self.feature_text.pack(side="left", fill="both", expand=True)
+    def _build_main_content(self):
+        main_content = ttk.Frame(self.root, padding=8)
+        main_content.pack(fill="both", expand=True)
+
+        self._build_image_preview_panel(main_content)
+        self._build_feature_output_panel(main_content)
+    def _build_ui(self):
+        """Build the main application user interface."""
+        self._build_top_bar()
+        self._build_navigation_bar()
+        self._build_settings_panel()
+        self._build_main_content()
+
     def _pca_window_build(self, title, with_kmeans):
         #Create a “child” window dedicated to PCA
         win = tk.Toplevel(self.root)
@@ -298,150 +346,91 @@ class App:
 
     def _pca_compute_inline(self):
         """
-        Calculate the PCA based on the loaded DataFrame and save the results.
-        Clean the data, keep only valid numeric columns, and standardize the features.
+        Compute PCA from the loaded CSV DataFrame.
         """
-        # Prerequisite: I must have loaded a CSV file into `self.df_csv`
         if self.df_csv is None:
-            return False, "Carica prima un CSV."
+            return False, "Load a CSV file first."
 
-        # Columns to EXCLUDE from PCA
-        exclude = {"path", "lbp_raggio", "lbp_punti",
-                   "thr_rmin", "thr_rmax", "thr_gmin", "thr_gmax", "thr_bmin", "thr_bmax"}
+        try:
+            result = compute_pca_from_dataframe(
+                df=self.df_csv,
+                n_components=int(self.pca_n.get()),
+                use_pca=bool(self.use_pca.get()),
+            )
 
-        # I take the candidate columns = all except the excluded ones
-        cols = [c for c in self.df_csv.columns if c not in exclude]
+        except ValueError as error:
+            return False, str(error)
 
-        #  Convert to numeric
-        #    Then I remove the columns that are entirely NaN
-        tmp = self.df_csv[cols].apply(pd.to_numeric, errors="coerce")
-        cols = [c for c in cols if not tmp[c].isna().all()]
-        if not cols:
-            return False, "Nessuna colonna numerica valida per PCA."
+        except Exception as error:
+            return False, f"Unexpected PCA error: {error}"
 
-        # Create the X feature matrix
-        X = self.df_csv[cols].apply(pd.to_numeric, errors="coerce")
-        # I keep ONLY the complete rows (without NaN) to avoid errors and ensure consistent PCA
-        valid = ~X.isna().any(axis=1)  # Boolean mask on rows
-        Xv = X.loc[valid].values  # final matrix (n_valid_rows, n_features)
-        if Xv.shape[0] < 2:
-            return False, "Poche righe valide (NaN) per PCA."
-        # I choose n components:
-        #    - if use_pca=True, I use the value specified by the user
-        #    - if use_pca=False, I set it to 2
-        ncomp = int(self.pca_n.get()) if self.use_pca.get() else 2
-        ncomp = max(2, min(ncomp, Xv.shape[1]))
+        self.pca_model = result.model
+        self.pca_scaler = result.scaler
+        self.pca_scores = result.scores
+        self.pca_feature_cols = result.feature_columns
+        self._pca_valid_mask = result.valid_mask
+        self._pca_evr = result.explained_variance_ratio
 
-        # PCA fit + transformation to scores
-        #    scores has shape (n_valid_rows, ncomp)
-        self.pca_scaler = StandardScaler().fit(Xv)
-        Xs = self.pca_scaler.transform(Xv)
-
-        # PCA fit + transformation to scores
-        #    scores has shape (n_valid_rows, ncomp)
-        self.pca_model = PCA(n_components=ncomp).fit(Xs)
-        scores = self.pca_model.transform(Xs)
-
-        # I put the scores into a DataFrame with columns PC1 through PCn,
-        self.pca_scores = pd.DataFrame(scores, columns=[f"PC{i}" for i in range(1, ncomp + 1)])
-
-        #  Save metadata useful for debugging/reuse:
-        self.pca_feature_cols = cols
-        self._pca_valid_mask = valid
-        self._pca_evr = self.pca_model.explained_variance_ratio_
-        return True, ""
-
-    def _pca_compute_from_helper(self):
-        """
-        Calculate the PCA using an external function and save the results in the app.
-        If something goes wrong, return an error message.
-        """
-        #  Check: I must have loaded the CSV into self.df_csv
-        if self.df_csv is None:
-            return False, "Carica prima un CSV."
-
-        #    returns:
-        #    ok/msg: result and message
-        #    pca: fitted PCA object
-        #    scaler: fitted StandardScaler object (
-        #    scores_df: DataFrame containing PCA scores
-        #    cols: list of feature columns actually used
-        #       valid_mask: mask of valid rows used for the fit
-        #    evr: explained_variance_ratio_
-
-        ok, msg, pca, scaler, scores_df, cols, valid_mask, evr = compute_pca_on_df_vars(self.df_csv,use_pca=bool(self.use_pca.get()), n_components=int(self.pca_n.get()),)
-        # If the helper reports an error
-        #    propagate the error to the caller.
-        if not ok:
-            return False, msg
-        # If everything is OK, save the results to `self` like this:
-        #    - `_pca_redraw()` can plot `self.pca_scores`
-        #    - `KMeans` can operate on `self.pca_scores.values`
-        #    - In the future, you can reuse the scaler/PCA to transform new data consistently
-        self.pca_model = pca
-        self.pca_scaler = scaler
-        self.pca_scores = scores_df
-        self.pca_feature_cols = cols
-        self._pca_valid_mask = valid_mask
-        self._pca_evr = evr
-
-        # 5) Return OK
         return True, ""
 
     def _pca_compute_refresh(self):
         """
-            Recalculate the PCA, reset the previous clusters, and update the graph.
-            If the calculation fails, display a warning and stop.
+        Recompute PCA, reset previous clusters and update the PCA plot.
         """
-        #I choose which PCA “pipeline” to use based on how the window was opened.
-        #    - _pca_mode == “helper”  -> use the external function compute_pca_on_df_vars (wraps everything)
-        #    - otherwise             -> use the inline version (calculate PCA within this class)
-        if getattr(self, "_pca_mode", None) == "helper":
-            ok, msg = self._pca_compute_from_helper()
-        else:
-            ok, msg = self._pca_compute_inline()
-        # If the calculation fails, I display a warning and stop: no redraw, no state update.
+        ok, message = self._pca_compute_inline()
+
         if not ok:
-            messagebox.showwarning("PCA", msg)
+            messagebox.showwarning("PCA", message)
             return
-        #When I recalculate the PCA, the old K-means labels are no longer valid
+
         self.kmeans_labels = None
+        self.kmeans_model = None
+        self.kmeans_centroids = None
+        self.kmeans_inertia = None
 
-        # I'm redrawing the scatter plot using the new PCA scores (self.pca_scores)
         self._pca_redraw()
-
     def _pca_run_kmeans(self):
         """
-        Groups PCA points into clusters using K-means.
-        If an error occurs, displays a message; otherwise, redraws the plot.
+        Run K-Means on the current PCA scores and redraw the PCA plot.
         """
-        # Run K-Means in PCA space
-        #    - k: number of clusters chosen by the user (spin box)
-        #    - n_init: number of different initializations to try (higher = more robust)
-        #    - random_state: repeatability of results
-        ok, msg, labels, km, _ = run_kmeans_vars(self.pca_scores.values,k=int(self.kmeans_k.get()), n_init=10,random_state=0)
-        #  If clustering fails
-        if not ok:
-            messagebox.showwarning("K-Means", msg)
+        if self.pca_scores is None or self.pca_scores.empty:
+            messagebox.showwarning(
+                "K-Means",
+                "Compute PCA before running K-Means."
+            )
             return
 
-        # If everything is OK, save:
-        #    - labels: to color the points in the scatter plot
-        #    - km: K-means model (useful if you want inertia, centroids, etc.)
-        self.kmeans_labels = labels
-        self.kmeans_model = km
-        # This time, I'm redrawing the scatter plot using colors by cluster.
-        self._pca_redraw()
+        try:
+            result = run_kmeans(
+                data=self.pca_scores.values,
+                n_clusters=int(self.kmeans_k.get()),
+                n_init=10,
+                random_state=0,
+            )
 
+        except ValueError as error:
+            messagebox.showwarning("K-Means", str(error))
+            return
+
+        except Exception as error:
+            messagebox.showerror(
+                "K-Means",
+                f"Unable to run K-Means:\n{error}"
+            )
+            return
+
+        self.kmeans_labels = result.labels
+        self.kmeans_model = result.model
+        self.kmeans_centroids = result.centroids
+        self.kmeans_inertia = result.inertia
+
+        self._pca_redraw()
     def open_subwindow(self):
         """
-        Opens the PCA window, sets up the controls, and displays the first graph.
+        Open the PCA window and display the initial PCA scatter plot.
         """
-        self._pca_mode = "inline"
-        # I create the window with KMeans controls enabled
         self._pca_window_build("PCA + Plot", with_kmeans=True)
-        # I'll calculate the PCA right away and plot the initial scatter plot.
-        self._pca_compute_refresh()
+        self._pca_compute_refresh
 
     def open_pca_plot_window(self):
         # This window uses PCA via the external helper `compute_pca_on_df_vars`
@@ -454,57 +443,35 @@ class App:
         # Automatically apply the threshold when the values change
         for v in (self.rmin, self.rmax, self.gmin, self.gmax, self.bmin, self.bmax):
             v.trace_add("write", lambda *_: self.apply_threshold_safe())
-    def _read_input_csv_as_df(self):
-        # Reads the input CSV file
-        df = pd.read_csv(self.input_csv_path, encoding="utf-8-sig")
-        # Case 1: The “path” column already exists
-        if "path" in df.columns:
-            df["path"] = df["path"].astype(str).str.strip()
-            return df
-        # Case 2: CSV file created with a single column and no header
-        first_col = df.columns[0]
-        df = df.rename(columns={first_col: "path"})
-        df["path"] = df["path"].astype(str).str.strip()
-        return df
 
     def load_csv(self):
-        # select CSV
-        fp = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
-        if not fp:
-            return
-        # Save CSV file path and directory
-        self.input_csv_path = fp
-        self.csv_dir = os.path.dirname(fp)
-        #  I'll try to read the CSV file
-        try:
-            # This function must:
-            # - read the CSV file
-            # - ensure that there is a “path” column
-            # - strip spaces
-            self.df_csv = self._read_input_csv_as_df()
+        csv_path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
 
-        except Exception as e:
-            messagebox.showerror("error", f"Unreadable CSV:\n{e}")
+        if not csv_path:
+            return
+
+        self.input_csv_path = csv_path
+        self.csv_dir = os.path.dirname(csv_path)
+
+        try:
+            self.df_csv = read_input_csv(self.input_csv_path)
+
+        except Exception as error:
+            messagebox.showerror("Error", f"Unreadable CSV:\n{error}")
             self.df_csv = None
             self.feature_cols = []
             self.paths = []
             return
 
-        #  I extract the paths from the “path” column
-        if "path" not in self.df_csv.columns:
-            messagebox.showwarning("Empty", "The CSV file does not contain a ‘path’ column.")
-            self.paths = []
-            self.feature_cols = []
-            return
-        self.paths = (self.df_csv["path"].astype(str).str.strip().replace("", np.nan).dropna().tolist())
-        # If there are no valid paths, stop
+        self.paths = extract_paths(self.df_csv)
+
         if not self.paths:
-            messagebox.showwarning("Empty", "No path found in the ‘path’ column.")
+            messagebox.showwarning("Empty", "No path found in the 'path' column.")
             self.feature_cols = []
             return
-        #  List of available feature columns
-        self.feature_cols = [c for c in self.df_csv.columns if c != "path"]
-        # I select the first image and upload it
+
+            self.feature_cols = get_feature_columns(self.df_csv)
+
         self.i = 0
         self.load_image()
 
@@ -538,26 +505,25 @@ class App:
 
         #  I'll try opening the image and converting it to RGB
         try:
-            self.img = Image.open(path).convert("RGB")
-        except Exception as e:
-            # If it fails: I'll display a warning, clear the state, and stop
-            messagebox.showerror("Errore", f"Impossibile aprire:\n{path}\n\n{e}")
+            self.img = load_rgb_image(path)
+        except Exception as error:
+            messagebox.showerror("Error", f"Unable to open:\n{path}\n\n{error}")
+
             self.img = None
             self.img_bin = None
 
-            # Update the status and clear the preview so the old image isn't left behind
-            self.status.config(text=f"{self.i + 1}/{len(self.paths)} | ERRORE: {path}")
-            self.p1.configure(image="")
-            self.p2.configure(image="")
+            self.status_label.config(text=f"{self.i + 1}/{len(self.paths)} | ERROR: {path}")
+            self.original_image_label.configure(image="")
+            self.mask_image_label.configure(image="")
             self.tk1 = None
             self.tk2 = None
             return
 
         # Update status “x/y | path”
-        self.status.config(text=f"{self.i + 1}/{len(self.paths)} | {path}")
+        self.status_label.config(text=f"{self.i + 1}/{len(self.paths)} | {path}")
 
         #  Show original image preview
-        self._show(self.img, self.p1, which=1)
+        self._show(self.img, self.original_image_label, which=1)
 
         # I'll try to load the thresholds associated with this image from the CSV file.
         #    If the thresholds (thr_*) are present in that row, I'll set them and apply the threshold once.
@@ -572,22 +538,23 @@ class App:
 
         # If there are no saved features, I clear the text box and reset the internal state
         if not loaded:
-            self.txt.delete("1.0", tk.END)
+            self.feature_text.delete("1.0", tk.END)
             self.last_features = None
             self.last_feature_names = None
 
-    def _show(self, img, label, which):
-        # Fixed size for the preview
-        W, H = 520, 520
-        iw, ih = img.size
-        s = min(W / iw, H / ih)
-        img2 = img.resize((max(1, int(iw * s)), max(1, int(ih * s))), Image.Resampling.NEAREST)
-        tkimg = ImageTk.PhotoImage(img2)
-        label.configure(image=tkimg)
+    def _show(self, image, label, which):
+        """
+        Show a resized image preview in a Tkinter label.
+        """
+        preview_image = resize_image_for_preview(image)
+        tk_image = ImageTk.PhotoImage(preview_image)
+
+        label.configure(image=tk_image)
+
         if which == 1:
-            self.tk1 = tkimg
+            self.tk1 = tk_image
         else:
-            self.tk2 = tkimg
+            self.tk2 = tk_image
 
     def load_threshold_from_csv_for_current_image(self):
         """
@@ -640,75 +607,79 @@ class App:
         return True
 
     def apply_threshold_safe(self):
-        #  When setting thresholds, I avoid recalculating the threshold every time I call .set() on the IntVars.
+        """
+        Apply the current RGB threshold to the loaded image.
+        """
         if self._suspend_threshold:
             return
-        #  If I don't have an image loaded, I can't apply the threshold
+
         if self.img is None:
             return
+
         try:
-            # 3) I call your threshold function using the current IntVar values (R/G/B min/max)
-            #    int(...) is needed because IntVars may contain temporary strings during editing
-            self.img_bin = threshold(
-                self.img,
-                int(self.rmin.get()), int(self.rmax.get()),
-                int(self.gmin.get()), int(self.gmax.get()),
-                int(self.bmin.get()), int(self.bmax.get())
+            self.img_bin = apply_rgb_threshold(
+                image=self.img,
+                threshold_function=threshold,
+                rmin=int(self.rmin.get()),
+                rmax=int(self.rmax.get()),
+                gmin=int(self.gmin.get()),
+                gmax=int(self.gmax.get()),
+                bmin=int(self.bmin.get()),
+                bmax=int(self.bmax.get()),
             )
-            #  Here's a preview of the binary mask:
-            self._show(self.img_bin.convert("RGB"), self.p2, which=2)
+
+            self._show(self.img_bin.convert("RGB"), self.mask_image_label, which=2)
 
         except Exception:
-            #    When entering data in the Entry fields, invalid input may occur
             self.img_bin = None
-            self.p2.configure(image="")  # clears the preview
-            self.tk2 = None  # Release reference to PhotoImage
+            self.mask_image_label.configure(image="")
+            self.tk2 = None
 
     def extract_features(self):
-        # If I don't have an image uploaded, I can't extract anything
+        """
+        Extract features from the current image and display them in the GUI.
+        """
         if self.img is None:
             return
-        #  Features depend on the bitmask: if the threshold is not met or missing, issue a warning and stop
+
         if self.img_bin is None:
             messagebox.showwarning(
                 "Threshold",
-                "Threshold non valido: controlla min/max (0..255 e min<=max)."
+                "Invalid threshold: check min/max values."
             )
             return
 
-        # I'll try to calculate the features by calling your external function.
         try:
-            features, nomi = estrazioni_feature_e_nomi(
-                self.img, self.img_bin,
-                self.nomi_features_geometriche,
-                self.nomi_features_haralick_canali,
-                self.nomi_canali,
-                raggio=int(self.raggio.get()),
-                punti=int(self.punti.get())
+            result = extract_image_features(
+                image=self.img,
+                binary_image=self.img_bin,
+                extraction_function=estrazioni_feature_e_nomi,
+                geometric_feature_names=self.nomi_features_geometriche,
+                haralick_channel_feature_names=self.nomi_features_haralick_canali,
+                channel_names=self.nomi_canali,
+                lbp_radius=int(self.raggio.get()),
+                lbp_points=int(self.punti.get()),
             )
-        except Exception as e:
-            # If the extraction fails, I display the error and stop.
-            messagebox.showerror("Errore feature", str(e))
+
+        except Exception as error:
+            messagebox.showerror("Feature extraction error", str(error))
             return
 
-        # Save the latest result in the app's status
-        self.last_features = features
-        self.last_feature_names = nomi
-        #  I clear the text box and type “name = value” in a way that's easy to read
-        self.txt.delete("1.0", tk.END)
-        #  If, for some reason, the lengths don't match, I'll print only the overlapping part
-        n = min(len(features), len(nomi))
-        for k in range(n):
-            name = str(nomi[k])
-            val = features[k]
-            self.txt.insert(tk.END, f"\t{name}=\t{val}\n")
+        self.last_features = result.values
+        self.last_feature_names = result.names
 
-        #  If there is a mismatch, I'll flag it in the text box as a diagnostic warning
-        if len(features) != len(nomi):
-            self.txt.insert(
-                tk.END,
-                f"\n[WARN] len(features)={len(features)} diverso da len(nomi)={len(nomi)}\n"
-            )
+        display_text = format_features_for_display(
+            result.names,
+            result.values,
+        )
+
+        display_text = append_warning_to_display_text(
+            display_text,
+            result.warning,
+        )
+
+        self.feature_text.delete("1.0", tk.END)
+        self.feature_text.insert(tk.END, display_text)
     def save_features(self):
         """except for the fields in the CSV"""
         if self.last_features is None or self.last_feature_names is None:
@@ -738,7 +709,7 @@ class App:
         row_dict["lbp_raggio"] = int(self.raggio.get())
         row_dict["lbp_punti"] = int(self.punti.get())
         try:
-            df = self._read_input_csv_as_df()
+            df = read_input_csv(self.input_csv_path)
 
             # create df row feature
             feat_df = pd.DataFrame([row_dict])
@@ -763,102 +734,132 @@ class App:
         self.df_csv = df
         self.feature_cols = [c for c in self.df_csv.columns if c != "path"]
 
-
-
+    def get_threshold_values(self):
+        """
+        Read the current RGB threshold values from the GUI.
+        """
+        return {
+            "thr_rmin": int(self.rmin.get()),
+            "thr_rmax": int(self.rmax.get()),
+            "thr_gmin": int(self.gmin.get()),
+            "thr_gmax": int(self.gmax.get()),
+            "thr_bmin": int(self.bmin.get()),
+            "thr_bmax": int(self.bmax.get()),
+        }
     def save_features_all(self):
-        "Save the dimensions of all images in the CSV file"
+        """
+        Extract and save features for all images listed in the input CSV file.
+        """
         if not self.paths:
-            messagebox.showwarning("Dataset", "First, upload a CSV file containing the paths.")
+            messagebox.showwarning(
+                "Dataset",
+                "First, load a CSV file containing image paths."
+            )
             return
-        if not self.input_csv_path:
-            messagebox.showwarning("Dataset", "First, upload an input CSV file.")
+
+        if not self.input_csv_path or self.df_csv is None:
+            messagebox.showwarning(
+                "Dataset",
+                "First, load an input CSV file."
+            )
             return
 
         errors = []
-        rows = []
+        feature_rows = []
 
         for idx, img_path in enumerate(self.paths, start=1):
             try:
-                img = Image.open(img_path).convert("RGB")
-                img_bin = threshold(
-                    img,
-                    int(self.rmin.get()), int(self.rmax.get()),
-                    int(self.gmin.get()), int(self.gmax.get()),
-                    int(self.bmin.get()), int(self.bmax.get())
+                image = load_rgb_image(img_path)
+
+                binary_image = apply_rgb_threshold(
+                    image=image,
+                    threshold_function=threshold,
+                    rmin=int(self.rmin.get()),
+                    rmax=int(self.rmax.get()),
+                    gmin=int(self.gmin.get()),
+                    gmax=int(self.gmax.get()),
+                    bmin=int(self.bmin.get()),
+                    bmax=int(self.bmax.get()),
                 )
 
-                features, nomi = estrazioni_feature_e_nomi(
-                    img, img_bin,
-                    self.nomi_features_geometriche,
-                    self.nomi_features_haralick_canali,
-                    self.nomi_canali,
-                    raggio=int(self.raggio.get()),
-                    punti=int(self.punti.get())
+                result = extract_image_features(
+                    image=image,
+                    binary_image=binary_image,
+                    extraction_function=estrazioni_feature_e_nomi,
+                    geometric_feature_names=self.nomi_features_geometriche,
+                    haralick_channel_feature_names=self.nomi_features_haralick_canali,
+                    channel_names=self.nomi_canali,
+                    lbp_radius=int(self.raggio.get()),
+                    lbp_points=int(self.punti.get()),
                 )
 
-                nomi = list(nomi)
-                n = min(len(features), len(nomi))
-                row = {nomi[k]: features[k] for k in range(n)}
-                row["path"] = img_path
-                row["thr_rmin"] = int(self.rmin.get())
-                row["thr_rmax"] = int(self.rmax.get())
-                row["thr_gmin"] = int(self.gmin.get())
-                row["thr_gmax"] = int(self.gmax.get())
-                row["thr_bmin"] = int(self.bmin.get())
-                row["thr_bmax"] = int(self.bmax.get())
-                row["lbp_raggio"] = int(self.raggio.get())
-                row["lbp_punti"] = int(self.punti.get())
-                rows.append(row)
+                feature_row = build_feature_row(
+                    image_path=img_path,
+                    feature_names=result.names,
+                    feature_values=result.values,
+                    threshold_values=self.get_threshold_values(),
+                    lbp_radius=int(self.raggio.get()),
+                    lbp_points=int(self.punti.get()),
+                )
+
+                feature_rows.append(feature_row)
 
                 if idx % 10 == 0 or idx == len(self.paths):
-                    self.status.config(text=f"Elaborate {idx}/{len(self.paths)}...")
+                    self.status_label.config(
+                        text=f"Processed {idx}/{len(self.paths)}..."
+                    )
                     self.root.update_idletasks()
 
-            except Exception as e:
-                errors.append((img_path, str(e)))
+            except Exception as error:
+                errors.append((img_path, str(error)))
 
-        if not rows and errors:
-            messagebox.showerror("Errore", f"No features saved. Errors in {len(errors)} images.")
+        if not feature_rows and errors:
+            messagebox.showerror(
+                "Error",
+                f"No features saved. Errors in {len(errors)} images."
+            )
             return
 
         try:
-            df = self._read_input_csv_as_df()
-            feat_df = pd.DataFrame(rows)
+            updated_df = update_dataset_with_feature_rows(
+                self.df_csv,
+                feature_rows,
+            )
 
-            # merge sulle path
-            df = df.merge(feat_df, on="path", how="left", suffixes=("", "_new"))
+            save_csv(updated_df, self.input_csv_path)
 
-            # Overwrites any duplicate columns
-            for c in feat_df.columns:
-                if c == "path":
-                    continue
-                newc = f"{c}_new"
-                if newc in df.columns:
-                    df[c] = df[newc]
-                    df.drop(columns=[newc], inplace=True)
-
-            df.to_csv(self.input_csv_path, index=False, encoding="utf-8-sig")
-
-        except Exception as e:
-            messagebox.showerror("Errore", f"Unable to save to the input CSV file:\n{e}")
+        except Exception as error:
+            messagebox.showerror(
+                "Error",
+                f"Unable to save to the input CSV file:\n{error}"
+            )
             return
 
+        self.df_csv = updated_df
+        self.feature_cols = get_real_feature_columns(self.df_csv)
+
         if errors:
-            messagebox.showwarning("Completato con errori",f"Saved in the input CSV file:\n{self.input_csv_path}\n\nOK: {len(rows)} immagini\nErrori: {len(errors)} immagini\n"   f"Esempio 1° errore:\n{errors[0][0]}\n{errors[0][1]}"    )
+            messagebox.showwarning(
+                "Completed with errors",
+                (
+                    f"Saved in the input CSV file:\n{self.input_csv_path}\n\n"
+                    f"OK: {len(feature_rows)} images\n"
+                    f"Errors: {len(errors)} images\n\n"
+                    f"First error:\n{errors[0][0]}\n{errors[0][1]}"
+                )
+            )
         else:
-            messagebox.showinfo("Completato", f"Saved in the input CSV file:\n{self.input_csv_path}\n\nOK: {len(rows)} immagini")
-        self.status.config(text="Pronto.")
-        self.df_csv = df
-        thr_cols = {"thr_rmin", "thr_rmax", "thr_gmin", "thr_gmax", "thr_bmin", "thr_bmax", "lbp_raggio", "lbp_punti"}
-        self.feature_cols = [c for c in self.df_csv.columns if c != "path" and c not in thr_cols]
+            messagebox.showinfo(
+                "Completed",
+                (
+                    f"Saved in the input CSV file:\n{self.input_csv_path}\n\n"
+                    f"OK: {len(feature_rows)} images"
+                )
+            )
+
+        self.status_label.config(text="Ready.")
     def load_features_from_csv_for_current_image(self):
         """If the CSV file already contains feature columns, load and display the values for the current image."""
-
-        #  Prerequisites: I must have:
-        #    - df_csv loaded
-        #    - a non-empty list of feature columns (feature_cols)
-        #    - a list of paths
-        #    - a valid index i
         if self.df_csv is None or not self.feature_cols or not self.paths:
             return False
         if self.i < 0 or self.i >= len(self.paths):
@@ -893,9 +894,9 @@ class App:
         self.last_feature_names = names
         self.last_features = vals
         #  Display the features in the text box
-        self.txt.delete("1.0", tk.END)
+        self.feature_text.delete("1.0", tk.END)
         for n, v in zip(names, vals):
-            self.txt.insert(tk.END, f"\t{n}=\t{v}\n")
+            self.feature_text.insert(tk.END, f"\t{n}=\t{v}\n")
         return True
 
 
