@@ -2,7 +2,7 @@ import csv
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
-from function import (threshold, estrazioni_feature_e_nomi, run_kmeans_vars, read_input_csv,
+from function import (threshold, estrazioni_feature_e_nomi,
                       extract_paths, get_real_feature_columns, get_feature_columns, read_input_csv, load_rgb_image,
                       apply_rgb_threshold, resize_image_for_preview, update_dataset_with_feature_rows, save_csv
                       , build_feature_row,    extract_image_features,
@@ -285,8 +285,8 @@ class App:
         # Button bar: Close + Calculate/Refresh and k-means
         btns = ttk.Frame(ctrl)
         btns.grid(row=1, column=0, columnspan=8, sticky="e", pady=(10, 0))
-        ttk.Button(btns, text="Chiudi", command=win.destroy).pack(side="right", padx=(0, 8))
-        ttk.Button(btns, text="Calcola / Refresh", command=self._pca_compute_refresh).pack(side="right")
+        ttk.Button(btns, text="Close", command=win.destroy).pack(side="right", padx=(0, 8))
+        ttk.Button(btns, text=" Refresh", command=self._pca_compute_refresh).pack(side="right")
         ttk.Button(btns, text="K-Means", command=self._pca_run_kmeans).pack(side="left", padx=(0, 8))
         # Brings the window to the front and gives it focus
         win.lift()

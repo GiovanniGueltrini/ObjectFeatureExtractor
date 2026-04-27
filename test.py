@@ -3,253 +3,570 @@ import numpy as np
 from hypothesis import given, strategies as st
 import mahotas
 import cv2
+from pathlib import Path
+import tkinter as tk
+from Dashboard import App
 import pandas as pd
-from function  import   threshold, estrazzione_features_geometriche, estrazione_feature_texturali
-from function import (
-    directory_immagini_to_csv,
-    compute_pca_on_df_vars,
-    run_kmeans_vars,
-    threshold,
-)
-@given(
-    h=st.integers(min_value=1, max_value=32),
-    w=st.integers(min_value=1, max_value=32),
-    r_min=st.integers(min_value=0, max_value=255),
-    r_max=st.integers(min_value=0, max_value=255),
-    g_min=st.integers(min_value=0, max_value=255),
-    g_max=st.integers(min_value=0, max_value=255),
-    b_min=st.integers(min_value=0, max_value=255),
-    b_max=st.integers(min_value=0, max_value=255),
-)
-def test_threshold(h, w, r_min, r_max, g_min, g_max, b_min, b_max):
+import os
+from function import (read_input_csv,
+    estrazzione_features_geometriche,
+    threshold,extract_paths, build_feature_row, update_dataset_with_feature_rows, resize_image_for_preview,extract_saved_features_from_row,
+                      apply_rgb_threshold,  extract_image_features, FeatureExtractionResult, select_numeric_feature_columns,
+                      compute_pca_from_dataframe,run_kmeans, estrazione_feature_texturali )
+
+
+######################### CSV MANAGER #######################################
+
+def test_read_input_csv_reads_dummy_csv_file(tmp_path):
     """
-    Tests:
-    if the output image has the same size as the input image
-    if each output pixel is 255 when the input pixel RGB values lie inside the given ranges
-    if each output pixel is 0 when at least one RGB channel is outside the given ranges
-    if the output binary mask matches exactly the mathematically expected result (pixel-wise)
-        """
-    # ordina i range (min <= max)
-    r0, r1 = sorted((r_min, r_max))
-    g0, g1 = sorted((g_min, g_max))
-    b0, b1 = sorted((b_min, b_max))
-
-    # immagine RGB casuale
-    arr = np.random.randint(0, 256, size=(h, w, 3), dtype=np.uint8)
-    img = Image.fromarray(arr, mode="RGB")
-
-    # output funzione da testare
-    out = threshold(img, r0, r1, g0, g1, b0, b1)
-    out_arr = np.array(out, dtype=np.uint8)
-
-    # atteso matematico coerente con threshold a range
-    expected = np.where(
-        (arr[:, :, 0] >= r0) & (arr[:, :, 0] <= r1) &
-        (arr[:, :, 1] >= g0) & (arr[:, :, 1] <= g1) &
-        (arr[:, :, 2] >= b0) & (arr[:, :, 2] <= b1),
-        255, 0
-    ).astype(np.uint8)
-
-    assert out.size == img.size #Deve avere la stessa dimensione dell’input
-    assert np.array_equal(out_arr, expected) #Ogni pixel deve essere identico a expected
-
-@given(
-    H=st.integers(min_value=16, max_value=128),
-    W=st.integers(min_value=16, max_value=128),
-    y0=st.integers(min_value=0, max_value=100),
-    x0=st.integers(min_value=0, max_value=100),
-    rh=st.integers(min_value=1, max_value=60),
-    rw=st.integers(min_value=1, max_value=60),
-)
-def test_estrazzione_features_geometriche(H, W, y0, x0, rh, rw):
+    read_input_csv should read a CSV file, keep the path column,
+    and strip spaces from path values.
     """
-    Tests:
-    if the output is a 1D numpy array with the expected length of  14 features
-    if all returned feature values are finite (no NaN or Inf)
-    if the computed bounding-box height equals the rectangle height used to build the mask
-    if the computed bounding-box width equals the rectangle width used to build the mask
-    if the computed area equals the rectangle area
-    if the computed aspect ratio equals width/height
-    if the computed extent is 1.0 for a fully-filled rectangle
-    """
-    # normalizza dimensioni rettangolo per stare dentro l'immagine
-    y0 = min(y0, H - 1)
-    x0 = min(x0, W - 1)
-    rh = min(rh, H - y0)
-    rw = min(rw, W - x0)
+    csv_path = tmp_path / "dummy_paths.csv"
 
-    # maschera con rettangolo pieno
-    arr = np.zeros((H, W), dtype=np.uint8)
-    arr[y0:y0+rh, x0:x0+rw] = 255
-    mask = Image.fromarray(arr, mode="L")
-
-    # output funzione da testare
-    feat = estrazzione_features_geometriche(mask)
-
-    # atteso matematico per le prime feature (quelle deterministiche)
-    expected_height = float(rh)
-    expected_width = float(rw)
-    expected_area = float(rh * rw)
-    expected_aspect = float(rw / rh) if rh > 0 else 0.0
-    expected_extent = 1.0  # rettangolo pieno: area = area bbox
-
-    assert feat.shape == (14,)
-    assert np.all(np.isfinite(feat))
-
-    height, width, area, aspect_ratio, extent = feat[:5]
-
-    assert height == expected_height
-    assert width == expected_width
-    assert area == expected_area
-    assert abs(aspect_ratio - expected_aspect) < 1e-12
-    assert abs(extent - expected_extent) < 1e-12
-
-@given(
-    H=st.integers(min_value=32, max_value=96),
-    W=st.integers(min_value=32, max_value=96),
-    raggio=st.integers(min_value=1, max_value=5),
-    punti=st.integers(min_value=4, max_value=12),
-)
-def test_estrazione_feature_texturali(H, W, raggio, punti):
-    """
-    Tests:
-    if the function returns two 1D numpy arrays (Haralick features and LBP features)
-    if both output vectors contain only finite values (no NaN or Inf)
-    if the Haralick output length matches 3 * (2 + n_haralick), i.e. mean+variance plus Haralick features for each RGB channel
-    if the LBP output length matches 3 * n_lbp, i.e. LBP histogram/features for each RGB channel
-    if the first two elements of the Haralick block for the first channel are respectively the mean and the variance of the masked ROI
-    """
-    # immagine RGB casuale
-    arr = np.random.randint(0, 256, size=(H, W, 3), dtype=np.uint8)
-    img = Image.fromarray(arr, mode="RGB")
-
-    # maschera binaria non vuota (rettangolo centrale)
-    mask_arr = np.zeros((H, W), dtype=np.uint8)
-    y0, y1 = H // 4, 3 * H // 4
-    x0, x1 = W // 4, 3 * W // 4
-    mask_arr[y0:y1, x0:x1] = 255
-    img_binary = Image.fromarray(mask_arr, mode="L")
-
-    # output funzione da testare
-    har, lbp = estrazione_feature_texturali(img, img_binary, raggio=raggio, punti=punti)
-
-    # proprietà base: vettori 1D finiti e coerenti
-    assert har.ndim == 1
-    assert lbp.ndim == 1
-    assert np.all(np.isfinite(har))
-    assert np.all(np.isfinite(lbp))
-
-    # lunghezza haralick: (2 + n_haralick) per canale, per 3 canali
-    # n_haralick = numero feature haralick (dipende da mahotas) => lo misuro direttamente una volta
-    roi0 = cv2.bitwise_and(arr[:, :, 0], arr[:, :, 0], mask=mask_arr)
-    n_h = mahotas.features.haralick(roi0, ignore_zeros=True).mean(axis=0).size
-    assert har.size == 3 * (2 + n_h)
-
-    # lunghezza lbp: 3 * len(lbp_per_canale)
-    l0 = mahotas.features.lbp(roi0, raggio, punti, ignore_zeros=True).size
-    assert lbp.size == 3 * l0
-
-    # check media/varianza del primo canale siano in testa al blocco canale-1
-    mean0 = float(np.mean(roi0.flatten()))
-    var0 = float(np.var(roi0.flatten()))
-    assert abs(har[0] - mean0) < 1e-9
-    assert abs(har[1] - var0) < 1e-9
-
-def test_directory_immagini_to_csv(tmp_path) -> None:
-    """
-    Tests:
-    if the function returns a pandas DataFrame
-    if the DataFrame has exactly one column named "path"
-    if only files with valid image extensions are included (e.g., .jpg, .png)
-    if non-image files are excluded (e.g., .txt)
-    if the number of rows equals the number of valid image files found in the directory
-    if the output CSV file is created in the target directory with the expected name
-    """
-    # creo "immagini" finte: basta il file con estensione valida
-    (tmp_path / "a.jpg").write_bytes(b"fake")
-    (tmp_path / "b.png").write_bytes(b"fake")
-    (tmp_path / "nope.txt").write_text("x")
-
-    df = directory_immagini_to_csv(str(tmp_path), recursive=False, csv_name="out.csv")
-
-    assert list(df.columns) == ["path"]
-    assert len(df) == 2
-    assert (tmp_path / "out.csv").exists()
-
-def test_compute_pca_on_df_vars() -> None:
-    """
-    Tests:
-    if the function returns ok=True and the message is exactly "OK" for a valid numeric dataframe
-    if the PCA scores dataframe is not None when use_pca=True
-    if the scores dataframe has exactly the expected PCA component columns (["PC1", "PC2"])
-    if the number of rows in the scores dataframe equals the number of input samples
-    if the explained variance ratio (evr) is not None when PCA is computed
-    if the explained variance ratio length equals n_components
-    """
-
-    df = pd.DataFrame({
-        "path": ["a", "b", "c", "d"],
-        "f1": [1.0, 2.0, 3.0, 4.0],
-        "f2": [4.0, 3.0, 2.0, 1.0],
-        "f3": [0.1, 0.2, 0.1, 0.2],
-    })
-
-    ok, msg, pca, scaler, scores_df, cols, valid_mask, evr = compute_pca_on_df_vars(
-        df, exclude={"path"}, use_pca=True, n_components=2
+    csv_path.write_text(
+        "path\n"
+        " image_1.png \n"
+        "image_2.jpg\n",
+        encoding="utf-8-sig",
     )
 
-    assert ok is True
-    assert msg == "OK"
-    assert scores_df is not None
-    assert list(scores_df.columns) == ["PC1", "PC2"]
-    assert len(scores_df) == 4
-    assert evr is not None
-    assert len(evr) == 2
+    df = read_input_csv(csv_path)
 
-def test_run_kmeans_vars() -> None:
-    """
-    Tests:
-    if the function returns ok=True and the message is exactly "OK" for a valid input matrix
-    if the returned labels array is not None
-    if the number of labels equals the number of input samples
-    if the produced labels belong to the expected set of cluster IDs {0, 1} when k=2
-    """
-    X = np.array([
-        [0.0, 0.0],
-        [0.1, 0.0],
-        [10.0, 10.0],
-        [10.1, 9.9],
-    ])
+    assert isinstance(df, pd.DataFrame)
+    assert list(df.columns) == ["path"]
+    assert df["path"].tolist() == [
+        "image_1.png",
+        "image_2.jpg",
+    ]
 
-    ok, msg, labels, km, Xc = run_kmeans_vars(X, k=2, random_state=0)
-
-    assert ok is True
-    assert msg == "OK"
-    assert labels is not None
-    assert len(labels) == 4
-    assert set(labels) <= {0, 1}
-
-def test_threshold() -> None:
+def test_threshold_sets_only_pixels_inside_rgb_range_to_white():
     """
-    Tests:
-    if only pixels whose RGB channels all lie inside the given ranges are set to 255
-    if pixels with at least one channel outside the given ranges are set to 0
-    if the output mask matches exactly the expected 2x2 result for a controlled input image
+    The threshold function should return 255 only for pixels whose R, G and B
+    values are all inside the selected ranges.
     """
-    # immagine 2x2 controllata
-    arr = np.array([
+    image_array = np.array([
         [[10, 10, 10], [200, 10, 10]],
         [[10, 200, 10], [10, 10, 200]],
     ], dtype=np.uint8)
-    img = Image.fromarray(arr, mode="RGB")
 
-    out = threshold(img, 0, 50, 0, 50, 0, 50)  # passa solo pixel (10,10,10)
-    out_arr = np.array(out, dtype=np.uint8)
+    image = Image.fromarray(image_array, mode="RGB")
 
-    # atteso: solo [0,0] bianco, gli altri neri
+    result = threshold(
+        image,
+        0, 50,
+        0, 50,
+        0, 50,
+    )
+
+    result_array = np.array(result, dtype=np.uint8)
+
     expected = np.array([
         [255, 0],
         [0, 0],
     ], dtype=np.uint8)
 
-    assert np.array_equal(out_arr, expected)
+    assert result.size == image.size
+    assert np.array_equal(result_array, expected)
+
+def test_extract_paths_returns_only_valid_non_empty_paths():
+    """
+    extract_paths should return only non-empty paths from the path column.
+    """
+    df = pd.DataFrame({
+        "path": [
+            "image_1.png",
+            " image_2.jpg ",
+            "",
+            None,
+            "image_3.tif",
+        ]
+    })
+
+    paths = extract_paths(df)
+
+    assert paths == [
+        "image_1.png",
+        "image_2.jpg",
+        "image_3.tif",
+    ]
+
+def test_build_feature_row_returns_features_metadata_and_path():
+    """
+    build_feature_row should return a dictionary containing feature values,
+    image path, threshold values and LBP parameters.
+    """
+    image_path = "images/sample_1.png"
+    feature_names = ["area", "solidity", "contrast"]
+    feature_values = [120.0, 0.85, 15.5]
+
+    threshold_values = {
+        "thr_rmin": 0,
+        "thr_rmax": 255,
+        "thr_gmin": 10,
+        "thr_gmax": 200,
+        "thr_bmin": 20,
+        "thr_bmax": 180,
+    }
+
+    row = build_feature_row(
+        image_path=image_path,
+        feature_names=feature_names,
+        feature_values=feature_values,
+        threshold_values=threshold_values,
+        lbp_radius=3,
+        lbp_points=8,
+    )
+
+    assert row["path"] == "images/sample_1.png"
+
+    assert row["area"] == 120.0
+    assert row["solidity"] == 0.85
+    assert row["contrast"] == 15.5
+
+    assert row["thr_rmin"] == 0
+    assert row["thr_rmax"] == 255
+    assert row["thr_gmin"] == 10
+    assert row["thr_gmax"] == 200
+    assert row["thr_bmin"] == 20
+    assert row["thr_bmax"] == 180
+
+    assert row["lbp_raggio"] == 3
+    assert row["lbp_punti"] == 8
+
+
+def test_update_dataset_with_feature_rows_updates_matching_path():
+    """
+    update_dataset_with_feature_rows should update existing feature values
+    and add new feature columns for matching image paths.
+    """
+    df = pd.DataFrame({
+        "path": ["image_1.png", "image_2.png"],
+        "area": [10.0, 20.0],
+    })
+
+    feature_rows = [
+        {
+            "path": "image_1.png",
+            "area": 99.0,
+            "solidity": 0.85,
+        }
+    ]
+
+    updated_df = update_dataset_with_feature_rows(df, feature_rows)
+
+    assert updated_df.loc[0, "path"] == "image_1.png"
+    assert updated_df.loc[0, "area"] == 99.0
+    assert updated_df.loc[0, "solidity"] == 0.85
+
+    assert updated_df.loc[1, "path"] == "image_2.png"
+    assert updated_df.loc[1, "area"] == 20.0
+    assert pd.isna(updated_df.loc[1, "solidity"])
+
+
+
+
+def test_extract_saved_features_from_row_ignores_missing_and_empty_values():
+    """
+    extract_saved_features_from_row should return only feature columns
+    with non-missing and non-empty values.
+    """
+    row = pd.Series({
+        "path": "image_1.png",
+        "area": 120.0,
+        "solidity": 0.85,
+        "contrast": pd.NA,
+        "entropy": "",
+        "unused_column": 999,
+    })
+
+    feature_columns = [
+        "area",
+        "solidity",
+        "contrast",
+        "entropy",
+        "missing_column",
+    ]
+
+    names, values = extract_saved_features_from_row(
+        row=row,
+        feature_columns=feature_columns,
+    )
+
+    assert names == ["area", "solidity"]
+    assert values == [120.0, 0.85]
+
+############# test image_manager#############################
+@given(
+    width=st.integers(min_value=1, max_value=3000),
+    height=st.integers(min_value=1, max_value=3000),
+    max_width=st.integers(min_value=1, max_value=1000),
+    max_height=st.integers(min_value=1, max_value=1000),
+)
+
+def test_resize_image_for_preview_never_exceeds_max_size(
+    width,
+    height,
+    max_width,
+    max_height,
+):
+    """
+    resize_image_for_preview should never return an image larger than
+    the requested maximum width and height.
+    """
+    image = Image.new("RGB", (width, height))
+
+    resized = resize_image_for_preview(
+        image,
+        max_width=max_width,
+        max_height=max_height,
+    )
+
+    resized_width, resized_height = resized.size
+
+    assert resized_width <= max_width
+    assert resized_height <= max_height
+    assert resized_width >= 1
+    assert resized_height >= 1
+
+def test_apply_rgb_threshold_calls_threshold_function_with_valid_values():
+    """
+    apply_rgb_threshold should validate RGB threshold values and call the
+    provided threshold function with the expected arguments.
+    """
+    image = Image.new("RGB", (2, 2))
+
+    calls = {}
+
+    def fake_threshold_function(image_arg, rmin, rmax, gmin, gmax, bmin, bmax):
+        calls["image"] = image_arg
+        calls["values"] = (rmin, rmax, gmin, gmax, bmin, bmax)
+        return Image.new("L", image_arg.size)
+
+    result = apply_rgb_threshold(
+        image=image,
+        threshold_function=fake_threshold_function,
+        rmin=0,
+        rmax=255,
+        gmin=10,
+        gmax=200,
+        bmin=20,
+        bmax=180,
+    )
+
+    assert result.mode == "L"
+    assert result.size == image.size
+    assert calls["image"] is image
+    assert calls["values"] == (0, 255, 10, 200, 20, 180)
+
+
+#####################feature_service######################
+@given(
+    width=st.integers(min_value=1, max_value=128),
+    height=st.integers(min_value=1, max_value=128),
+)
+def test_threshold_returns_binary_mask_with_same_size(width, height):
+    """
+    threshold should always return a binary mask with the same size as the
+    input image.
+    """
+    image_array = np.zeros((height, width, 3), dtype=np.uint8)
+    image = Image.fromarray(image_array, mode="RGB")
+
+    result = threshold(
+        image,
+        0, 255,
+        0, 255,
+        0, 255,
+    )
+
+    result_array = np.array(result, dtype=np.uint8)
+
+    assert result.mode == "L"
+    assert result.size == image.size
+    assert set(np.unique(result_array)) <= {0, 255}
+@given(
+    image_height=st.integers(min_value=16, max_value=128),
+    image_width=st.integers(min_value=16, max_value=128),
+    rectangle_height=st.integers(min_value=1, max_value=32),
+    rectangle_width=st.integers(min_value=1, max_value=32),
+)
+def test_geometric_features_are_finite_for_random_rectangles(
+    image_height,
+    image_width,
+    rectangle_height,
+    rectangle_width,
+):
+    """
+    estrazzione_features_geometriche should return a finite 14-element vector
+    for valid filled rectangular masks of different sizes.
+    """
+    rectangle_height = min(rectangle_height, image_height)
+    rectangle_width = min(rectangle_width, image_width)
+
+    mask_array = np.zeros((image_height, image_width), dtype=np.uint8)
+    mask_array[0:rectangle_height, 0:rectangle_width] = 255
+
+    mask = Image.fromarray(mask_array, mode="L")
+
+    features = estrazzione_features_geometriche(mask)
+
+    assert features.shape == (14,)
+    assert np.all(np.isfinite(features))
+
+
+
+def create_texture_test_image_and_mask():
+    """
+    Create a small RGB image and a non-empty binary mask for texture tests.
+    """
+    image_array = np.full((40, 40, 3), 100, dtype=np.uint8)
+
+    mask_array = np.zeros((40, 40), dtype=np.uint8)
+    mask_array[10:30, 10:30] = 255
+
+    image = Image.fromarray(image_array, mode="RGB")
+    mask = Image.fromarray(mask_array, mode="L")
+
+    return image, mask
+
+def test_texture_features_are_finite():
+    """
+    estrazione_feature_texturali should return finite numerical values.
+    """
+    image, mask = create_texture_test_image_and_mask()
+
+    haralick_features, lbp_features = estrazione_feature_texturali(
+        image,
+        mask,
+        raggio=3,
+        punti=8,
+    )
+
+    assert np.all(np.isfinite(haralick_features))
+    assert np.all(np.isfinite(lbp_features))
+def fake_extraction_function(
+        image_arg,
+        binary_image_arg,
+        geometric_feature_names,
+        haralick_channel_feature_names,
+        channel_names,
+        raggio,
+        punti,
+    ):
+        return [100.0, 0.85], ["area", "solidity"]
+def test_extract_image_features_returns_structured_result():
+    """
+    extract_image_features should call the extraction function and return
+    feature names and values inside a FeatureExtractionResult object.
+    """
+    image = Image.new("RGB", (10, 10))
+    binary_image = Image.new("L", (10, 10))
+
+
+
+    result = extract_image_features(
+        image=image,
+        binary_image=binary_image,
+        extraction_function=fake_extraction_function,
+        geometric_feature_names=["area", "solidity"],
+        haralick_channel_feature_names=[],
+        channel_names=["red", "green", "blue"],
+        lbp_radius=3,
+        lbp_points=8,
+    )
+
+    assert isinstance(result, FeatureExtractionResult)
+    assert result.values == [100.0, 0.85]
+    assert result.names == ["area", "solidity"]
+    assert result.warning is None
+
+def test_extract_image_features_truncates_output_and_returns_warning_on_length_mismatch():
+    """
+    extract_image_features should truncate names and values to the same length
+    and return a warning when their lengths do not match.
+    """
+    image = Image.new("RGB", (10, 10))
+    binary_image = Image.new("L", (10, 10))
+
+    def fake_extraction_function_with_mismatch(
+        image_arg,
+        binary_image_arg,
+        geometric_feature_names,
+        haralick_channel_feature_names,
+        channel_names,
+        raggio,
+        punti,
+    ):
+        return [100.0, 0.85, 15.2], ["area", "solidity"]
+
+    result = extract_image_features(
+        image=image,
+        binary_image=binary_image,
+        extraction_function=fake_extraction_function_with_mismatch,
+        geometric_feature_names=["area", "solidity"],
+        haralick_channel_feature_names=[],
+        channel_names=["red", "green", "blue"],
+        lbp_radius=3,
+        lbp_points=8,
+    )
+
+    assert result.values == [100.0, 0.85]
+    assert result.names == ["area", "solidity"]
+    assert result.warning is not None
+    assert "does not match" in result.warning
+###################################PCA_servie######################à
+def test_select_numeric_feature_columns_excludes_metadata_columns():
+    """
+    select_numeric_feature_columns should exclude path, threshold and LBP
+    metadata columns and keep valid numeric feature columns.
+    """
+    df = pd.DataFrame({
+        "path": ["img1.png", "img2.png"],
+        "thr_rmin": [0, 0],
+        "thr_rmax": [255, 255],
+        "lbp_raggio": [3, 3],
+        "lbp_punti": [8, 8],
+        "area": [100.0, 200.0],
+        "solidity": [0.85, 0.90],
+    })
+
+    columns = select_numeric_feature_columns(df)
+
+    assert columns == ["area", "solidity"]
+
+def test_select_numeric_feature_columns_accepts_numeric_strings():
+    """
+    select_numeric_feature_columns should keep columns that contain numeric
+    values stored as strings.
+    """
+    df = pd.DataFrame({
+        "path": ["img1.png", "img2.png"],
+        "area": ["100.0", "200.0"],
+        "solidity": ["0.85", "0.90"],
+    })
+
+    columns = select_numeric_feature_columns(df)
+
+    assert columns == ["area", "solidity"]
+
+
+
+
+def test_compute_pca_from_dataframe_returns_complete_result():
+    """
+    compute_pca_from_dataframe should return PCA scores, model, scaler,
+    selected feature columns, valid row mask and explained variance ratio.
+    """
+    df = pd.DataFrame({
+        "path": ["img1.png", "img2.png", "img3.png", "img4.png"],
+        "thr_rmin": [0, 0, 0, 0],
+        "lbp_raggio": [3, 3, 3, 3],
+        "area": [10.0, 20.0, 30.0, 40.0],
+        "solidity": [0.80, 0.85, 0.90, 0.95],
+        "contrast": [5.0, 6.0, 7.0, 8.0],
+    })
+
+    result = compute_pca_from_dataframe(
+        df=df,
+        n_components=2,
+        use_pca=True,
+    )
+
+    assert list(result.scores.columns) == ["PC1", "PC2"]
+    assert result.scores.shape == (4, 2)
+
+    assert result.feature_columns == ["area", "solidity", "contrast"]
+    assert result.valid_mask.tolist() == [True, True, True, True]
+
+    assert result.model.n_components == 2
+    assert result.scaler is not None
+    assert len(result.explained_variance_ratio) == 2
+
+def test_compute_pca_from_dataframe_excludes_rows_with_missing_values():
+    """
+    compute_pca_from_dataframe should exclude rows containing NaN values
+    in the selected feature columns.
+    """
+    df = pd.DataFrame({
+        "path": ["img1.png", "img2.png", "img3.png", "img4.png"],
+        "area": [10.0, None, 30.0, 40.0],
+        "solidity": [0.80, 0.85, 0.90, 0.95],
+        "contrast": [5.0, 6.0, 7.0, 8.0],
+    })
+
+    result = compute_pca_from_dataframe(
+        df=df,
+        n_components=2,
+        use_pca=True,
+    )
+
+    assert result.scores.shape == (3, 2)
+    assert result.valid_mask.tolist() == [True, False, True, True]
+    assert result.feature_columns == ["area", "solidity", "contrast"]
+
+###########################k-means#############################
+def test_run_kmeans_returns_complete_clustering_result():
+    """
+    run_kmeans should return labels, fitted model, centroids and inertia
+    for a valid input matrix.
+    """
+    data = np.array([
+        [0.0, 0.0],
+        [0.1, 0.0],
+        [10.0, 10.0],
+        [10.1, 10.0],
+    ])
+
+    result = run_kmeans(
+        data=data,
+        n_clusters=2,
+        n_init=10,
+        random_state=0,
+    )
+
+    assert result.labels.shape == (4,)
+    assert set(result.labels) <= {0, 1}
+
+    assert result.centroids.shape == (2, 2)
+
+    assert result.model.n_clusters == 2
+    assert result.model.n_init == 10
+
+    assert isinstance(result.inertia, float)
+    assert result.inertia >= 0
+
+
+########### Test  ui ###########################
+def test_app_initializes_without_errors():
+    """
+    App should initialize the Tkinter interface without raising errors.
+    """
+    root = tk.Tk()
+    root.withdraw()
+
+    app = App(root)
+
+    assert app.root is root
+
+    root.destroy()
+
+
+def test_app_creates_main_widgets():
+    """
+    App should create the main widgets used by the interface.
+    """
+    root = tk.Tk()
+    root.withdraw()
+
+    app = App(root)
+
+    assert hasattr(app, "status_label")
+    assert hasattr(app, "original_image_label")
+    assert hasattr(app, "mask_image_label")
+    assert hasattr(app, "feature_text")
+
+    root.destroy()
+
+
+
